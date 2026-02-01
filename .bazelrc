@@ -1,0 +1,3 @@
+build --enable_bzlmod
+query --enable_bzlmod
+build --repo_env=DOCKER_CONFIG=/dev/null

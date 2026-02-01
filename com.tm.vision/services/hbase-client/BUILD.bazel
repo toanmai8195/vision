@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "hbase-client",
+    srcs = [
+        "client.go",
+        "config.go",
+    ],
+    importpath = "com.tm.vision/com.tm.vision/services/hbase-client",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_tsuna_gohbase//:gohbase",
+        "@com_github_tsuna_gohbase//hrpc",
+    ],
+)
