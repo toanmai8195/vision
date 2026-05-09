@@ -2,7 +2,7 @@
 
 ## Khi bắt đầu session mới
 
-1. Đọc checklist trong `PLAN.md` (phần đầu file)
+1. Đọc `CHECKLIST.md`
 2. Tìm item `[ ]` đầu tiên chưa được tick
 3. Báo cho user biết đang ở bước nào, phase nào
 4. Hỏi "bắt đầu không?" trước khi làm
