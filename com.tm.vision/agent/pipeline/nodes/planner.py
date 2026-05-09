@@ -1,6 +1,6 @@
 import os
 import anthropic
-from pipeline.state import AgentState
+from agent.pipeline.state import AgentState
 
 _client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 

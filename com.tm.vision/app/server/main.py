@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from pipeline.graph import build_graph  # noqa: E402 — load_dotenv phải chạy trước
+from agent.pipeline.graph import build_graph  # noqa: E402 — load_dotenv phải chạy trước
 
 _graph = None
 

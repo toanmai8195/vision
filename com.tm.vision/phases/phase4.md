@@ -17,7 +17,7 @@ scion init   # trong com.tm.vision/
 ```
 .scion/
   └── settings.yaml         # grove config, runtime=local (docker)
-agents/
+agent/agents/
   ├── planner-agent.yaml    # claude harness, system prompt planner
   └── reviewer-agent.yaml   # claude harness, system prompt reviewer
 ```
@@ -29,7 +29,7 @@ grove:
   worktree: ./workspace
 ```
 
-## `agents/planner-agent.yaml`
+## `agent/agents/planner-agent.yaml`
 ```yaml
 schema_version: "1"
 default_harness_config: "claude"
@@ -44,7 +44,7 @@ env:
   ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
 ```
 
-## `agents/reviewer-agent.yaml`
+## `agent/agents/reviewer-agent.yaml`
 ```yaml
 schema_version: "1"
 default_harness_config: "claude"

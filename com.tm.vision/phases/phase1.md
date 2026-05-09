@@ -24,15 +24,15 @@ Response:
 ## Files
 ```
 com.tm.vision/
-├── pipeline/
+├── agent/pipeline/           ← LangGraph
 │   ├── state.py            # AgentState: task, plan, code
 │   ├── graph.py            # StateGraph: planner → implementer → END
 │   └── nodes/
 │       ├── planner.py      # Claude: nhận task → trả plan
 │       └── implementer.py  # Ollama: nhận plan → trả code
-├── api/
+├── app/server/
 │   └── main.py             # FastAPI: POST /run, GET /health
-├── projects/
+├── app/projects/
 │   └── mark1.yaml          # config cho repo mark1
 ├── workspace/              # git worktrees (gitignore)
 ├── requirements.txt

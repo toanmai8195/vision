@@ -2,28 +2,28 @@
 
 ### Phase 1 — LangGraph + FastAPI → [phases/phase1.md](phases/phase1.md)
 - [x] Tạo `requirements.txt` + `.env.example`
-- [x] Tạo `pipeline/state.py` — `AgentState(task, plan, code)`
-- [x] Tạo `pipeline/nodes/planner.py` — gọi Claude, trả plan
-- [x] Tạo `pipeline/nodes/implementer.py` — gọi Ollama, trả code
-- [x] Tạo `pipeline/graph.py` — `StateGraph`: planner → implementer → END
-- [x] Tạo `api/main.py` — FastAPI: `POST /run`, `GET /health`
-- [x] Tạo `projects/mark1.yaml` — config repo mark1
-- [x] Test: `uvicorn api.main:app` chạy không lỗi
+- [x] Tạo `agent/pipeline/state.py` — `AgentState(task, plan, code)`
+- [x] Tạo `agent/pipeline/nodes/planner.py` — gọi Claude, trả plan
+- [x] Tạo `agent/pipeline/nodes/implementer.py` — gọi Ollama, trả code
+- [x] Tạo `agent/pipeline/graph.py` — `StateGraph`: planner → implementer → END
+- [x] Tạo `app/server/main.py` — FastAPI: `POST /run`, `GET /health`
+- [x] Tạo `app/projects/mark1.yaml` — config repo mark1
+- [x] Test: `uvicorn app.server.main:app` chạy không lỗi
 - [ ] Test: `http://localhost:8000/docs` hiện OpenAPI UI
 - [ ] Test: `POST /run {"task": "..."}` trả về `{plan, code}`
 
 ### Phase 2 — Full Pipeline → [phases/phase2.md](phases/phase2.md)
-- [ ] Tạo `pipeline/nodes/reviewer.py` — Claude review code
-- [ ] Tạo `pipeline/nodes/git_ops.py` — tạo branch, commit, push lên mark1
-- [ ] Cập nhật `pipeline/graph.py` — thêm reviewer + conditional edges + git_push
+- [ ] Tạo `agent/pipeline/nodes/reviewer.py` — Claude review code
+- [ ] Tạo `agent/pipeline/nodes/git_ops.py` — tạo branch, commit, push lên mark1
+- [ ] Cập nhật `agent/pipeline/graph.py` — thêm reviewer + conditional edges + git_push
 - [ ] Mở rộng `AgentState` — thêm `implementation, review_feedback, review_iterations, approved, branch_name`
 - [ ] Test: pipeline chạy đủ 4 bước (plan → implement → review → push)
 - [ ] Test: branch `agent/{slug}-{ts}` xuất hiện trên github.com/toanmai8195/mark1
 
 ### Phase 3 — Multi-Project Config → [phases/phase3.md](phases/phase3.md)
-- [ ] Tạo `pipeline/config.py` — load + validate `projects/*.yaml`
-- [ ] Cập nhật `api/main.py` — nhận thêm field `project` trong request body
-- [ ] Cập nhật `pipeline/nodes/git_ops.py` — dùng worktree thay vì clone thẳng
+- [ ] Tạo `agent/pipeline/config.py` — load + validate `projects/*.yaml`
+- [ ] Cập nhật `app/server/main.py` — nhận thêm field `project` trong request body
+- [ ] Cập nhật `agent/pipeline/nodes/git_ops.py` — dùng worktree thay vì clone thẳng
 - [ ] Setup workspace: `git clone --bare mark1 workspace/mark1`
 - [ ] Test: thêm `projects/mark1-v2.yaml` (repo giả), POST `/run {"project": "mark1-v2", ...}` chạy đúng
 
@@ -33,8 +33,8 @@
 - [ ] Tạo `.scion/settings.yaml`
 - [ ] Tạo `agents/planner-agent.yaml`
 - [ ] Tạo `agents/reviewer-agent.yaml`
-- [ ] Cập nhật `pipeline/nodes/planner.py` — dùng `scion start` thay Anthropic SDK trực tiếp
-- [ ] Cập nhật `pipeline/nodes/reviewer.py` — dùng `scion start`
+- [ ] Cập nhật `agent/pipeline/nodes/planner.py` — dùng `scion start` thay Anthropic SDK trực tiếp
+- [ ] Cập nhật `agent/pipeline/nodes/reviewer.py` — dùng `scion start`
 - [ ] Test: `scion list` thấy agents trong containers khi pipeline chạy
 - [ ] Test: pipeline vẫn cho kết quả đúng như Phase 2/3
 
@@ -52,9 +52,9 @@
 - [ ] Tạo secret `gh-runner-secret` trên k3s
 - [ ] `kubectl apply -f k8s/gh-runner-deployment.yaml`
 - [ ] Tạo `.github/workflows/ci.yaml` trong repo **mark1** — trigger `agent/**`
-- [ ] Tạo `pipeline/nodes/ci_watcher.py` — poll GitHub API
-- [ ] Cập nhật `api/main.py` — thêm `POST /ci-callback`
-- [ ] Cập nhật `pipeline/graph.py` — thêm `ci_watcher` node + conditional edge
+- [ ] Tạo `agent/pipeline/nodes/ci_watcher.py` — poll GitHub API
+- [ ] Cập nhật `app/server/main.py` — thêm `POST /ci-callback`
+- [ ] Cập nhật `agent/pipeline/graph.py` — thêm `ci_watcher` node + conditional edge
 - [ ] Mở rộng `AgentState` — thêm `ci_passed, ci_feedback`
 - [ ] Test: push branch → Actions tự trigger trên self-hosted runner
 - [ ] Test: CI fail → implementer nhận lỗi, retry

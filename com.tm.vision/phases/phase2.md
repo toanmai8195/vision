@@ -13,10 +13,10 @@ planner → implementer → reviewer (Claude)
 
 ## Files thêm
 ```
-pipeline/nodes/
+agent/pipeline/nodes/
   ├── reviewer.py   # Claude: đọc code → {"approved": bool, "feedback": str}
   └── git_ops.py    # gitpython: tạo branch agent/{slug}-{ts}, commit, push
-pipeline/
+agent/pipeline/
   └── graph.py      # cập nhật: thêm reviewer + conditional edges + git_push
 ```
 

@@ -11,14 +11,14 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 ## Files thêm
 ```
-k8s/
+agent/k8s/
   ├── namespace.yaml        # namespace: vision-agents
   └── workspace-pvc.yaml    # PVC 5Gi (local-path, k3s built-in)
 .scion/
   └── settings.yaml         # cập nhật: runtime=kubernetes
 ```
 
-## `k8s/namespace.yaml`
+## `agent/k8s/namespace.yaml`
 ```yaml
 apiVersion: v1
 kind: Namespace
@@ -26,7 +26,7 @@ metadata:
   name: vision-agents
 ```
 
-## `k8s/workspace-pvc.yaml`
+## `agent/k8s/workspace-pvc.yaml`
 ```yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -54,7 +54,7 @@ runtimes:
     kubeconfig: /etc/rancher/k3s/k3s.yaml
 ```
 
-## `agents/*.yaml` cập nhật
+## `agent/agents/*.yaml` cập nhật
 ```yaml
 volumes:
   - name: workspace
@@ -63,7 +63,7 @@ volumes:
 
 ## Apply
 ```bash
-kubectl apply -f k8s/
+kubectl apply -f agent/k8s/
 ```
 
 ## Deliverable

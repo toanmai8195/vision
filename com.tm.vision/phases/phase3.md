@@ -4,7 +4,7 @@
 
 ## Config file per project
 ```yaml
-# projects/mark1.yaml
+# app/projects/mark1.yaml
 name: mark1
 repo: https://github.com/toanmai8195/mark1.git
 branch_prefix: agent
@@ -18,18 +18,18 @@ ollama_model: qwen2.5-coder:7b
 ```
 POST /run
   body: {
-    "project": "mark1",   # load từ projects/mark1.yaml
+    "project": "mark1",   # load từ app/projects/mark1.yaml
     "task": "implement X"
   }
 ```
 
 ## Files thêm/sửa
 ```
-pipeline/
-  └── config.py           # load + validate projects/*.yaml (dùng pydantic)
-pipeline/nodes/
+agent/pipeline/
+  └── config.py           # load + validate app/projects/*.yaml (dùng pydantic)
+agent/pipeline/nodes/
   └── git_ops.py          # cập nhật: dùng git worktree thay vì clone thẳng
-api/
+app/server/
   └── main.py             # cập nhật: nhận field "project" trong request
 ```
 
@@ -45,5 +45,5 @@ git -C workspace/mark1 worktree remove worktrees/run-{id}
 ```
 
 ## Deliverable
-- Thêm project mới = tạo 1 file `projects/{name}.yaml`, không sửa code
+- Thêm project mới = tạo 1 file `app/projects/{name}.yaml`, không sửa code
 - `POST /run {"project": "mark1", "task": "..."}` chạy đúng repo

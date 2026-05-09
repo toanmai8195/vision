@@ -16,18 +16,18 @@ Runner chạy trên k3s → không tốn phút GitHub Actions.
 
 ## Files thêm
 ```
-k8s/
+agent/k8s/
   └── gh-runner-deployment.yaml   # GitHub Actions runner Pod
 .github/
   └── workflows/
       └── ci.yaml                 # trong repo mark1 (không phải vision)
-pipeline/nodes/
+agent/pipeline/nodes/
   └── ci_watcher.py               # poll GitHub API đợi CI kết quả
-api/
+app/server/
   └── main.py                     # thêm POST /ci-callback
 ```
 
-## `k8s/gh-runner-deployment.yaml`
+## `agent/k8s/gh-runner-deployment.yaml`
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -70,7 +70,7 @@ spec:
 kubectl create secret generic gh-runner-secret \
   --from-literal=token=<RUNNER_TOKEN> \
   -n vision-agents
-kubectl apply -f k8s/gh-runner-deployment.yaml
+kubectl apply -f agent/k8s/gh-runner-deployment.yaml
 ```
 
 ## `.github/workflows/ci.yaml` (trong repo mark1)

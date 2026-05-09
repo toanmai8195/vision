@@ -1,6 +1,6 @@
 import os
 import ollama
-from pipeline.state import AgentState
+from agent.pipeline.state import AgentState
 
 _MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
 _BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
