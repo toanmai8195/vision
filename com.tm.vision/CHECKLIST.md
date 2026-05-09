@@ -6,9 +6,9 @@
 - [x] Tạo `agent/pipeline/nodes/planner.py` — gọi Claude, trả plan
 - [x] Tạo `agent/pipeline/nodes/implementer.py` — gọi Ollama, trả code
 - [x] Tạo `agent/pipeline/graph.py` — `StateGraph`: planner → implementer → END
-- [x] Tạo `app/server/main.py` — FastAPI: `POST /run`, `GET /health`
+- [x] Tạo `agent/api/main.py` — FastAPI: `POST /run`, `GET /health`
 - [x] Tạo `app/projects/mark1.yaml` — config repo mark1
-- [x] Test: `uvicorn app.server.main:app` chạy không lỗi
+- [x] Test: `uvicorn agent.api.main:app` chạy không lỗi
 - [ ] Test: `http://localhost:8000/docs` hiện OpenAPI UI
 - [ ] Test: `POST /run {"task": "..."}` trả về `{plan, code}`
 
@@ -22,7 +22,7 @@
 
 ### Phase 3 — Multi-Project Config → [phases/phase3.md](phases/phase3.md)
 - [ ] Tạo `agent/pipeline/config.py` — load + validate `projects/*.yaml`
-- [ ] Cập nhật `app/server/main.py` — nhận thêm field `project` trong request body
+- [ ] Cập nhật `agent/api/main.py` — nhận thêm field `project` trong request body
 - [ ] Cập nhật `agent/pipeline/nodes/git_ops.py` — dùng worktree thay vì clone thẳng
 - [ ] Setup workspace: `git clone --bare mark1 workspace/mark1`
 - [ ] Test: thêm `projects/mark1-v2.yaml` (repo giả), POST `/run {"project": "mark1-v2", ...}` chạy đúng
@@ -53,7 +53,7 @@
 - [ ] `kubectl apply -f k8s/gh-runner-deployment.yaml`
 - [ ] Tạo `.github/workflows/ci.yaml` trong repo **mark1** — trigger `agent/**`
 - [ ] Tạo `agent/pipeline/nodes/ci_watcher.py` — poll GitHub API
-- [ ] Cập nhật `app/server/main.py` — thêm `POST /ci-callback`
+- [ ] Cập nhật `agent/api/main.py` — thêm `POST /ci-callback`
 - [ ] Cập nhật `agent/pipeline/graph.py` — thêm `ci_watcher` node + conditional edge
 - [ ] Mở rộng `AgentState` — thêm `ci_passed, ci_feedback`
 - [ ] Test: push branch → Actions tự trigger trên self-hosted runner
