@@ -5,6 +5,25 @@
 Một hệ thống **reusable**: chỉ cần khai báo repo + yêu cầu → pipeline tự động
 plan → implement → review → push code → CI/CD.
 
+## Repos
+
+| Repo | URL | Vai trò |
+|------|-----|---------|
+| `vision` | https://github.com/toanmai8195/vision | Orchestration system (pipeline, agents, k8s config) |
+| `mark1` | https://github.com/toanmai8195/mark1 | Target project — nơi agents viết code và push |
+
+Thêm project mới = thêm 1 file `projects/{name}.yaml` trong `vision`.
+
+## Workspace (git worktree)
+
+```
+vision/com.tm.vision/
+  workspace/
+    mark1/              ← bare clone của mark1 (1 lần duy nhất)
+      worktrees/
+        run-{id}/       ← isolated worktree mỗi lần chạy
+```
+
 ---
 
 ## Phase 1 — LangGraph Basics + API (Hello World)
@@ -41,6 +60,9 @@ com.tm.vision/
 │       └── implementer.py  # Ollama: nhận plan → trả code
 ├── api/
 │   └── main.py         # FastAPI: POST /run, GET /health
+├── projects/
+│   └── mark1.yaml      # config cho repo mark1
+├── workspace/          # git worktrees (gitignore)
 ├── requirements.txt
 └── .env.example
 ```
@@ -92,9 +114,9 @@ review_feedback, review_iterations, approved, branch_name
 
 ### Config file per project
 ```yaml
-# projects/my-project.yaml
-name: my-project
-repo: https://github.com/org/my-project.git
+# projects/mark1.yaml
+name: mark1
+repo: https://github.com/toanmai8195/mark1.git
 branch_prefix: agent
 language: [go, python]
 build_tool: bazel
@@ -106,7 +128,7 @@ ollama_model: qwen2.5-coder:7b
 ```
 POST /run
   body: {
-    "project": "my-project",   # load từ projects/my-project.yaml
+    "project": "mark1",        # load từ projects/mark1.yaml
     "task": "implement X"
   }
 ```
@@ -115,8 +137,8 @@ POST /run
 ```
 com.tm.vision/
 ├── projects/
-│   ├── my-project.yaml
-│   └── another-project.yaml
+│   ├── mark1.yaml             ← project đầu tiên
+│   └── another-project.yaml  ← thêm project mới = thêm file này
 └── pipeline/
     └── config.py    # load + validate project config
 ```
