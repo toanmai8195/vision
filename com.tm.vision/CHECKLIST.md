@@ -1,14 +1,14 @@
 # Checklist
 
 ### Phase 1 — LangGraph + FastAPI → [phases/phase1.md](phases/phase1.md)
-- [ ] Tạo `requirements.txt` + `.env.example`
-- [ ] Tạo `pipeline/state.py` — `AgentState(task, plan, code)`
-- [ ] Tạo `pipeline/nodes/planner.py` — gọi Claude, trả plan
-- [ ] Tạo `pipeline/nodes/implementer.py` — gọi Ollama, trả code
-- [ ] Tạo `pipeline/graph.py` — `StateGraph`: planner → implementer → END
-- [ ] Tạo `api/main.py` — FastAPI: `POST /run`, `GET /health`
-- [ ] Tạo `projects/mark1.yaml` — config repo mark1
-- [ ] Test: `uvicorn api.main:app` chạy không lỗi
+- [x] Tạo `requirements.txt` + `.env.example`
+- [x] Tạo `pipeline/state.py` — `AgentState(task, plan, code)`
+- [x] Tạo `pipeline/nodes/planner.py` — gọi Claude, trả plan
+- [x] Tạo `pipeline/nodes/implementer.py` — gọi Ollama, trả code
+- [x] Tạo `pipeline/graph.py` — `StateGraph`: planner → implementer → END
+- [x] Tạo `api/main.py` — FastAPI: `POST /run`, `GET /health`
+- [x] Tạo `projects/mark1.yaml` — config repo mark1
+- [x] Test: `uvicorn api.main:app` chạy không lỗi
 - [ ] Test: `http://localhost:8000/docs` hiện OpenAPI UI
 - [ ] Test: `POST /run {"task": "..."}` trả về `{plan, code}`
 

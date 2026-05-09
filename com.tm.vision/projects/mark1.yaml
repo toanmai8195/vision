@@ -1,0 +1,7 @@
+name: mark1
+repo: https://github.com/toanmai8195/mark1.git
+branch_prefix: agent
+language: [go, python]
+build_tool: bazel
+max_review_iterations: 3
+ollama_model: qwen2.5-coder:7b
