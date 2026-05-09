@@ -1,2 +1,0 @@
-# vision
-Go lang demo
