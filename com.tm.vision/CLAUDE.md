@@ -4,10 +4,10 @@
 
 1. Đọc `CHECKLIST.md`
 2. Tìm item `[ ]` đầu tiên chưa được tick
-3. Báo cho user biết đang ở bước nào, phase nào
+3. Báo cho user: đang ở item nào, thuộc phase nào
 4. Hỏi "bắt đầu không?" trước khi làm
-5. Khi user đồng ý: đọc phần detail của phase đó trong `PLAN.md` rồi thực hiện
-6. Sau khi xong mỗi item: tick `[x]` trong `PLAN.md`, commit, rồi tiếp item tiếp theo
+5. Khi user đồng ý: đọc file `phases/phase{N}.md` tương ứng rồi thực hiện
+6. Sau khi xong mỗi item: tick `[x]` trong `CHECKLIST.md`, commit, rồi tiếp item tiếp theo
 
 ## Repos
 
