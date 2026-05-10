@@ -1,0 +1,14 @@
+# SCION agent definition: Ollama Planner
+#
+# Chạy:
+#   scion start --no-hub ollama-planner --workspace /tmp/vision-ws/<run-id>
+#
+# Input:  /workspace/task.txt
+# Output: /workspace/plan.md
+
+schema_version: "1"
+harness: ollama-planner      # trỏ vào ~/.scion/harness-configs/ollama-planner/
+max_duration: "5m"
+env:
+  OLLAMA_BASE_URL: "${OLLAMA_BASE_URL}"
+  OLLAMA_MODEL: "${OLLAMA_MODEL}"

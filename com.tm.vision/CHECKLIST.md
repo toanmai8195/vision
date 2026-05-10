@@ -28,17 +28,17 @@
 - [ ] Test: thêm `projects/mark1-v2.yaml` (repo giả), POST `/run {"project": "mark1-v2", ...}` chạy đúng
 
 ### Phase 4 — SCION + Ollama Containers → [phases/phase4.md](phases/phase4.md)
-- [ ] Cài SCION CLI: `go install github.com/GoogleCloudPlatform/scion/cmd/scion@latest`
-- [ ] `scion init` trong `com.tm.vision/`
-- [ ] Tạo `docker/ollama-agent/Dockerfile` — Python + ollama client
-- [ ] Tạo `docker/ollama-agent/planner.py` — đọc task.txt → Ollama → ghi plan.md
-- [ ] Tạo `docker/ollama-agent/reviewer.py` — đọc implementation/ → Ollama → ghi review.json
-- [ ] Build image: `docker build -t ollama-agent:latest docker/ollama-agent/`
-- [ ] Tạo `.scion/settings.yaml`
-- [ ] Tạo `agent/agents/ollama-planner.yaml`
-- [ ] Tạo `agent/agents/ollama-reviewer.yaml`
-- [ ] Cập nhật `agent/pipeline/nodes/planner.py` — dùng `scion start` (hoặc `docker run`)
-- [ ] Cập nhật `agent/pipeline/nodes/reviewer.py` — dùng `scion start` (hoặc `docker run`)
+- [x] Cài SCION CLI: `go install github.com/GoogleCloudPlatform/scion/cmd/scion@latest`
+- [x] `scion init --machine` + `scion init --no-hub` trong repo root
+- [x] Tạo `docker/ollama-agent/Dockerfile` — Python + ollama client
+- [x] Tạo `docker/ollama-agent/planner.py` — đọc task.txt → Ollama → ghi plan.md
+- [x] Tạo `docker/ollama-agent/reviewer.py` — đọc implementation/ → Ollama → ghi review.json
+- [x] Build image: `docker build -t ollama-agent:latest docker/ollama-agent/`
+- [x] Tạo `.scion/settings.yaml`
+- [x] Tạo `agent/agents/ollama-planner.yaml`
+- [x] Tạo `agent/agents/ollama-reviewer.yaml`
+- [x] Cập nhật `agent/pipeline/nodes/planner.py` — dùng `docker run`
+- [x] Cập nhật `agent/pipeline/nodes/reviewer.py` — dùng `docker run`
 - [ ] Test: `docker ps` thấy container `ollama-agent` khi pipeline chạy
 - [ ] Test: pipeline vẫn cho kết quả đúng như Phase 2/3
 

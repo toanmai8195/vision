@@ -1,0 +1,15 @@
+# SCION agent definition: Ollama Reviewer
+#
+# Chạy:
+#   scion start --no-hub ollama-reviewer --workspace /tmp/vision-ws/<run-id>
+#
+# Input:  /workspace/plan.md
+#         /workspace/implementation/<files>
+# Output: /workspace/review.json
+
+schema_version: "1"
+harness: ollama-reviewer     # trỏ vào ~/.scion/harness-configs/ollama-reviewer/
+max_duration: "5m"
+env:
+  OLLAMA_BASE_URL: "${OLLAMA_BASE_URL}"
+  OLLAMA_MODEL: "${OLLAMA_MODEL}"
