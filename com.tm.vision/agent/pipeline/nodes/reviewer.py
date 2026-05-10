@@ -1,12 +1,7 @@
 import json
-import os
-
-import ollama
+import subprocess
 
 from agent.pipeline.state import AgentState
-
-_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
-_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 _SYSTEM = """You are a senior code reviewer.
 Given a plan and its implementation, review for correctness, code quality, and adherence to the plan.
@@ -20,19 +15,22 @@ def reviewer_node(state: AgentState) -> AgentState:
         for path, code in state["implementation"].items()
     )
 
-    client = ollama.Client(host=_BASE_URL)
-    response = client.chat(
-        model=_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {
-                "role": "user",
-                "content": f"Plan:\n{state['plan']}\n\nImplementation:\n{code_sections}",
-            },
-        ],
-    )
+    prompt = f"Plan:\n{state['plan']}\n\nImplementation:\n{code_sections}"
 
-    text = response.message.content.strip()
+    result = subprocess.run(
+        [
+            "claude",
+            "-p", prompt,
+            "--system-prompt", _SYSTEM,
+            "--output-format", "text",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude reviewer failed: {result.stderr}")
+
+    text = result.stdout.strip()
     try:
         start = text.index("{")
         end = text.rindex("}") + 1
