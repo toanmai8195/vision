@@ -13,10 +13,10 @@
 - [ ] Test: `POST /run {"task": "..."}` trả về `{plan, code}`
 
 ### Phase 2 — Full Pipeline → [phases/phase2.md](phases/phase2.md)
-- [ ] Tạo `agent/pipeline/nodes/reviewer.py` — Claude review code
-- [ ] Tạo `agent/pipeline/nodes/git_ops.py` — tạo branch, commit, push lên mark1
-- [ ] Cập nhật `agent/pipeline/graph.py` — thêm reviewer + conditional edges + git_push
-- [ ] Mở rộng `AgentState` — thêm `implementation, review_feedback, review_iterations, approved, branch_name`
+- [x] Tạo `agent/pipeline/nodes/reviewer.py` — Claude review code
+- [x] Tạo `agent/pipeline/nodes/git_ops.py` — tạo branch, commit, push lên mark1
+- [x] Cập nhật `agent/pipeline/graph.py` — thêm reviewer + conditional edges + git_push
+- [x] Mở rộng `AgentState` — thêm `implementation, review_feedback, review_iterations, approved, branch_name`
 - [ ] Test: pipeline chạy đủ 4 bước (plan → implement → review → push)
 - [ ] Test: branch `agent/{slug}-{ts}` xuất hiện trên github.com/toanmai8195/mark1
 

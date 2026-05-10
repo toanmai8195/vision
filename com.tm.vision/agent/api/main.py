@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -19,8 +20,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Vision Pipeline",
-    description="AI coding pipeline: Claude planner → Ollama implementer",
-    version="0.1.0",
+    description="AI coding pipeline: Claude planner → Ollama implementer → Claude reviewer → git push",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -31,7 +32,10 @@ class RunRequest(BaseModel):
 
 class RunResponse(BaseModel):
     plan: str
-    code: str
+    implementation: dict[str, str]
+    review_iterations: int
+    approved: bool
+    branch_name: str
 
 
 @app.get("/health")
@@ -41,5 +45,19 @@ def health():
 
 @app.post("/run", response_model=RunResponse)
 def run(req: RunRequest):
-    result = _graph.invoke({"task": req.task, "plan": "", "code": ""})
-    return RunResponse(plan=result["plan"], code=result["code"])
+    result = _graph.invoke({
+        "task": req.task,
+        "plan": "",
+        "implementation": {},
+        "review_feedback": "",
+        "review_iterations": 0,
+        "approved": False,
+        "branch_name": "",
+    })
+    return RunResponse(
+        plan=result["plan"],
+        implementation=result["implementation"],
+        review_iterations=result["review_iterations"],
+        approved=result["approved"],
+        branch_name=result["branch_name"],
+    )
