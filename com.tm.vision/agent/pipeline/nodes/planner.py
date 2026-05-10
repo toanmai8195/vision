@@ -1,9 +1,11 @@
-import shutil
-import subprocess
+import os
+
+import ollama
 
 from agent.pipeline.state import AgentState
 
-_CLAUDE = shutil.which("claude") or "/Users/toanmai/.local/bin/claude"
+_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 _SYSTEM = """You are a senior software architect.
 Given a coding task, produce a concise implementation plan.
@@ -12,16 +14,12 @@ Be specific about function signatures, types, and logic — but do not write cod
 
 
 def planner_node(state: AgentState) -> AgentState:
-    result = subprocess.run(
-        [
-            _CLAUDE,
-            "-p", f"Task: {state['task']}",
-            "--system-prompt", _SYSTEM,
-            "--output-format", "text",
+    client = ollama.Client(host=_BASE_URL)
+    response = client.chat(
+        model=_MODEL,
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": f"Task: {state['task']}"},
         ],
-        capture_output=True,
-        text=True,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"claude planner failed: {result.stderr}")
-    return {"plan": result.stdout.strip()}
+    return {"plan": response.message.content}
