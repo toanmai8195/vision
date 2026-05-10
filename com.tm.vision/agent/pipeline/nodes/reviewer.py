@@ -1,7 +1,10 @@
 import json
+import shutil
 import subprocess
 
 from agent.pipeline.state import AgentState
+
+_CLAUDE = shutil.which("claude") or "/Users/toanmai/.local/bin/claude"
 
 _SYSTEM = """You are a senior code reviewer.
 Given a plan and its implementation, review for correctness, code quality, and adherence to the plan.
@@ -19,7 +22,7 @@ def reviewer_node(state: AgentState) -> AgentState:
 
     result = subprocess.run(
         [
-            "claude",
+            _CLAUDE,
             "-p", prompt,
             "--system-prompt", _SYSTEM,
             "--output-format", "text",

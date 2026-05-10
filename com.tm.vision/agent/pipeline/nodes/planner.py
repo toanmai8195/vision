@@ -1,6 +1,9 @@
+import shutil
 import subprocess
 
 from agent.pipeline.state import AgentState
+
+_CLAUDE = shutil.which("claude") or "/Users/toanmai/.local/bin/claude"
 
 _SYSTEM = """You are a senior software architect.
 Given a coding task, produce a concise implementation plan.
@@ -11,7 +14,7 @@ Be specific about function signatures, types, and logic — but do not write cod
 def planner_node(state: AgentState) -> AgentState:
     result = subprocess.run(
         [
-            "claude",
+            _CLAUDE,
             "-p", f"Task: {state['task']}",
             "--system-prompt", _SYSTEM,
             "--output-format", "text",
