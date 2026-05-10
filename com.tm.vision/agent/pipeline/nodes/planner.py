@@ -1,8 +1,11 @@
 import os
-import anthropic
+
+import ollama
+
 from agent.pipeline.state import AgentState
 
-_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 _SYSTEM = """You are a senior software architect.
 Given a coding task, produce a concise implementation plan.
@@ -11,10 +14,12 @@ Be specific about function signatures, types, and logic — but do not write cod
 
 
 def planner_node(state: AgentState) -> AgentState:
-    response = _client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": f"Task: {state['task']}"}],
+    client = ollama.Client(host=_BASE_URL)
+    response = client.chat(
+        model=_MODEL,
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": f"Task: {state['task']}"},
+        ],
     )
-    return {"plan": response.content[0].text}
+    return {"plan": response.message.content}
