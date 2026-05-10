@@ -1,71 +1,144 @@
-# Phase 4 — Add SCION
+# Phase 4 — SCION + Ollama Custom Agents
 
-**Mục tiêu**: Claude agents chạy trong isolated containers qua SCION.
+**Mục tiêu**: Planner và Reviewer chạy trong isolated Docker containers qua SCION.
+Implementer giữ nguyên (gọi Ollama trực tiếp từ pipeline).
 
-## Thay đổi so với Phase 3
-- Planner + Reviewer: từ gọi Anthropic SDK trực tiếp → `scion start` (container)
-- Ollama Implementer: giữ nguyên (SCION chưa hỗ trợ Ollama native)
-- Workspace chia sẻ qua thư mục local (chưa cần k3s)
+## Stack
 
-## Cài đặt
+```
+pipeline (host)
+  ├── planner_node  → scion start ollama-planner  → container → Ollama (host.docker.internal)
+  ├── implementer   → ollama.chat() trực tiếp (giữ nguyên)
+  ├── reviewer_node → scion start ollama-reviewer → container → Ollama (host.docker.internal)
+  └── git_push_node → git worktree (giữ nguyên)
+```
+
+## Cài đặt SCION
+
 ```bash
 go install github.com/GoogleCloudPlatform/scion/cmd/scion@latest
+# đảm bảo ~/go/bin trong PATH
 scion init   # trong com.tm.vision/
 ```
 
 ## Files thêm
+
 ```
+docker/ollama-agent/
+  ├── Dockerfile          # Python + ollama client
+  ├── planner.py          # đọc task.txt → gọi Ollama → ghi plan.md
+  └── reviewer.py         # đọc plan.md + implementation/ → gọi Ollama → ghi review.json
 .scion/
-  └── settings.yaml         # grove config, runtime=local (docker)
+  └── settings.yaml
 agent/agents/
-  ├── planner-agent.yaml    # claude harness, system prompt planner
-  └── reviewer-agent.yaml   # claude harness, system prompt reviewer
+  ├── ollama-planner.yaml
+  └── ollama-reviewer.yaml
+```
+
+## `docker/ollama-agent/Dockerfile`
+
+```dockerfile
+FROM python:3.12-slim
+RUN pip install ollama
+WORKDIR /workspace
+COPY planner.py reviewer.py ./
+```
+
+## `docker/ollama-agent/planner.py`
+
+```python
+import os, ollama
+
+task = open("/workspace/task.txt").read()
+client = ollama.Client(host=os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434"))
+resp = client.chat(
+    model=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b"),
+    messages=[
+        {"role": "system", "content": "You are a senior software architect. Given a task, produce a concise numbered implementation plan. Do NOT write code."},
+        {"role": "user", "content": f"Task: {task}"},
+    ],
+)
+open("/workspace/plan.md", "w").write(resp.message.content)
+```
+
+## `docker/ollama-agent/reviewer.py`
+
+```python
+import json, os, ollama
+from pathlib import Path
+
+plan = open("/workspace/plan.md").read()
+impl = "\n\n".join(
+    f"### {f.name}\n```\n{f.read_text()}\n```"
+    for f in Path("/workspace/implementation").glob("*") if f.is_file()
+)
+client = ollama.Client(host=os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434"))
+resp = client.chat(
+    model=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b"),
+    messages=[
+        {"role": "system", "content": 'You are a code reviewer. Respond ONLY with JSON: {"approved": true/false, "feedback": "..."}'},
+        {"role": "user", "content": f"Plan:\n{plan}\n\nImplementation:\n{impl}"},
+    ],
+)
+text = resp.message.content
+data = json.loads(text[text.index("{"):text.rindex("}")+1])
+open("/workspace/review.json", "w").write(json.dumps(data))
 ```
 
 ## `.scion/settings.yaml`
+
 ```yaml
 schema_version: "1"
 grove:
   worktree: ./workspace
 ```
 
-## `agent/agents/planner-agent.yaml`
+## `agent/agents/ollama-planner.yaml`
+
 ```yaml
 schema_version: "1"
-default_harness_config: "claude"
-system_prompt: |
-  You are a senior software architect.
-  Read workspace/task.txt → write structured plan to workspace/plan.md.
-  Do NOT write code. Write ONLY plan.md then exit.
-agent_instructions: "Read workspace/task.txt, write workspace/plan.md, then exit."
-max_turns: 30
-max_duration: "10m"
+image: ollama-agent:latest
+command: ["python", "planner.py"]
 env:
-  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  OLLAMA_BASE_URL: "${OLLAMA_BASE_URL}"
+  OLLAMA_MODEL: "${OLLAMA_MODEL}"
+max_duration: "5m"
 ```
 
-## `agent/agents/reviewer-agent.yaml`
+## `agent/agents/ollama-reviewer.yaml`
+
 ```yaml
 schema_version: "1"
-default_harness_config: "claude"
-system_prompt: |
-  You are a senior code reviewer.
-  Read workspace/implementation/ → write to workspace/review.json:
-  {"approved": true/false, "feedback": "..."}
-  Do NOT modify code. Write ONLY review.json then exit.
-agent_instructions: "Review workspace/implementation/, write workspace/review.json, then exit."
-max_turns: 30
-max_duration: "10m"
+image: ollama-agent:latest
+command: ["python", "reviewer.py"]
 env:
-  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  OLLAMA_BASE_URL: "${OLLAMA_BASE_URL}"
+  OLLAMA_MODEL: "${OLLAMA_MODEL}"
+max_duration: "5m"
 ```
 
 ## Nodes thay đổi
+
 ```
-planner.py:  subprocess "scion start planner-agent ..." → poll logs → read plan.md
-reviewer.py: subprocess "scion start reviewer-agent ..." → poll logs → read review.json
+planner.py:
+  1. ghi task vào workspace/task.txt
+  2. scion start ollama-planner (hoặc docker run trực tiếp nếu SCION chưa support custom image)
+  3. đọc workspace/plan.md về state["plan"]
+
+reviewer.py:
+  1. ghi state["implementation"] vào workspace/implementation/
+  2. scion start ollama-reviewer
+  3. đọc workspace/review.json → parse approved/feedback
+```
+
+## Build image
+
+```bash
+docker build -t ollama-agent:latest docker/ollama-agent/
 ```
 
 ## Deliverable
-- `scion list` thấy agents đang chạy trong containers khi pipeline chạy
-- Pipeline vẫn cho kết quả đúng như Phase 2/3
+
+- `docker ps` thấy container `ollama-agent` khi pipeline chạy
+- Pipeline cho kết quả đúng như Phase 2/3
+- Planner và Reviewer isolated trong container, không chạy trực tiếp trên host

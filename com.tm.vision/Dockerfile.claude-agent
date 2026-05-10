@@ -1,0 +1,12 @@
+FROM node:lts-alpine
+
+# Cài claude-code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Tắt auto-updater — không cần trong container
+ENV DISABLE_AUTOUPDATER=1
+
+# Working dir mặc định
+WORKDIR /workspace
+
+ENTRYPOINT ["claude"]
