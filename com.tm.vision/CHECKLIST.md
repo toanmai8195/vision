@@ -21,10 +21,10 @@
 - [ ] Test: branch `agent/{slug}-{ts}` xuất hiện trên github.com/toanmai8195/mark1
 
 ### Phase 3 — Multi-Project Config → [phases/phase3.md](phases/phase3.md)
-- [ ] Tạo `agent/pipeline/config.py` — load + validate `projects/*.yaml`
-- [ ] Cập nhật `agent/api/main.py` — nhận thêm field `project` trong request body
-- [ ] Cập nhật `agent/pipeline/nodes/git_ops.py` — dùng worktree thay vì clone thẳng
-- [ ] Setup workspace: `git clone --bare mark1 workspace/mark1`
+- [x] Tạo `agent/pipeline/config.py` — load + validate `projects/*.yaml`
+- [x] Cập nhật `agent/api/main.py` — nhận thêm field `project` trong request body
+- [x] Cập nhật `agent/pipeline/nodes/git_ops.py` — dùng worktree thay vì clone thẳng
+- [x] Setup workspace: `git clone --bare mark1 workspace/mark1`
 - [ ] Test: thêm `projects/mark1-v2.yaml` (repo giả), POST `/run {"project": "mark1-v2", ...}` chạy đúng
 
 ### Phase 4 — Add SCION → [phases/phase4.md](phases/phase4.md)

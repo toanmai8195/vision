@@ -1,46 +1,46 @@
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 # Load .env trước khi import graph — vì graph đọc os.getenv() lúc import
 load_dotenv()
 
-from agent.pipeline.graph import build_graph  # noqa: E402
+from agent.pipeline.config import load_project  # noqa: E402
+from agent.pipeline.graph import build_graph    # noqa: E402
 
-_graph = None
+# Cache graph theo project — tránh build lại mỗi request
+_graphs: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Build graph 1 lần khi server khởi động, tái sử dụng cho mọi request.
-
-    Dùng lifespan thay vì global init để đảm bảo .env đã được load trước.
-    """
-    global _graph
-    _graph = build_graph()
-    yield  # server chạy ở đây cho đến khi shutdown
+    """Pre-build graph cho project mặc định khi server khởi động."""
+    _graphs["mark1"] = build_graph("mark1")
+    yield
 
 
 app = FastAPI(
     title="Vision Pipeline",
-    description="AI coding pipeline: Ollama planner → Ollama implementer → Ollama reviewer → git push",
-    version="0.2.0",
+    description="AI coding pipeline: planner → implementer → reviewer → git push",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
 
 class RunRequest(BaseModel):
-    task: str  # mô tả task muốn agent thực hiện
+    project: str = "mark1"  # tên project trong app/projects/{project}.yaml
+    task: str               # mô tả task muốn agent thực hiện
 
 
 class RunResponse(BaseModel):
-    plan: str                      # kế hoạch implement
-    implementation: dict[str, str] # code đã viết {filepath: code}
-    review_iterations: int         # số lần review đã chạy
-    approved: bool                 # reviewer có approve không
-    branch_name: str               # branch đã push lên GitHub
+    project: str
+    plan: str
+    implementation: dict[str, str]
+    review_iterations: int
+    approved: bool
+    branch_name: str
 
 
 @app.get("/health")
@@ -51,12 +51,25 @@ def health():
 
 @app.post("/run", response_model=RunResponse)
 def run(req: RunRequest):
-    """Chạy toàn bộ pipeline: plan → implement → review → git push.
+    """Chạy toàn bộ pipeline cho một project cụ thể.
 
-    Đồng bộ (blocking) — client cần chờ đến khi pipeline hoàn tất.
+    Project được load từ app/projects/{project}.yaml.
+    Graph được cache — lần đầu mỗi project sẽ build graph, sau đó tái sử dụng.
     """
-    # Khởi tạo state với giá trị rỗng — các node sẽ điền dần vào
-    result = _graph.invoke({
+    # Validate project tồn tại trước khi chạy
+    try:
+        load_project(req.project)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # Build graph lần đầu nếu chưa có trong cache
+    if req.project not in _graphs:
+        _graphs[req.project] = build_graph(req.project)
+
+    graph = _graphs[req.project]
+
+    result = graph.invoke({
+        "project": req.project,
         "task": req.task,
         "plan": "",
         "implementation": {},
@@ -65,7 +78,9 @@ def run(req: RunRequest):
         "approved": False,
         "branch_name": "",
     })
+
     return RunResponse(
+        project=result["project"],
         plan=result["plan"],
         implementation=result["implementation"],
         review_iterations=result["review_iterations"],
