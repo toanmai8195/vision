@@ -1,0 +1,53 @@
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_test")
+load("//tools/rules:com_tm_container.bzl", "com_tm_kt_image")
+
+# Activation API (Kotlin / Vert.x 5 / Dagger2).
+#   bazel run //com/tm/src/activation/api:activation_api
+#   bazel run --config=linux-arm64 //com/tm/src/activation/api:activation_api_docker
+com_tm_kt_image(
+    name = "activation_api",
+    package_name = package_name(),
+    srcs = [
+        "ActivationApiComponent.kt",
+        "ApiConfig.kt",
+        "ApiVerticle.kt",
+        "CoreModule.kt",
+        "HttpRoutes.kt",
+        "Main.kt",
+    ],
+    exposed_ports = ["8080/tcp"],
+    jvm_flags = ["-XX:MaxRAMPercentage=70.0"],
+    main_class = "com.tm.vision.activation.api.MainKt",
+    runtime_deps = ["@maven//:org_slf4j_slf4j_simple"],
+    deps = [
+        "//com/tm/proto/vision/segment/v1:segment_java_proto",
+        "//third_party/dagger",
+        "@maven//:io_micrometer_micrometer_core",
+        "@maven//:io_micrometer_micrometer_registry_prometheus",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_lang_kotlin_coroutines",
+        "@maven//:io_vertx_vertx_micrometer_metrics",
+        "@maven//:io_vertx_vertx_web",
+        "@maven//:org_jetbrains_kotlinx_kotlinx_coroutines_core_jvm",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
+
+kt_jvm_test(
+    name = "activation_api_test",
+    srcs = ["ActivationApiTest.kt"],
+    test_class = "com.tm.vision.activation.api.ActivationApiTest",
+    deps = [
+        ":activation_api_lib",
+        "//com/tm/proto/vision/catalog/v1:catalog_java_proto",
+        "//com/tm/proto/vision/segment/v1:segment_java_proto",
+        "@maven//:io_micrometer_micrometer_registry_prometheus",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_lang_kotlin_coroutines",
+        "@maven//:io_vertx_vertx_web_client",
+        "@maven//:junit_junit",
+        "@maven//:org_jetbrains_kotlinx_kotlinx_coroutines_core_jvm",
+        "@protobuf//java/core",
+        "@protobuf//java/util",
+    ],
+)

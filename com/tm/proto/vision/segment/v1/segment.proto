@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+// Segment DSL (CLAUDE.md §6.1).
+package vision.segment.v1;
+
+import "com/tm/proto/vision/catalog/v1/catalog.proto";
+
+option go_package = "com.tm/vision/com/tm/proto/vision/segment/v1;segmentv1";
+option java_multiple_files = true;
+option java_package = "com.tm.vision.proto.segment.v1";
+
+// Khoảng ngày tuỳ chọn, bao gồm hai đầu. Format YYYY-MM-DD.
+message CustomDateRange {
+  string from_date = 1;
+  string to_date = 2;
+}
+
+message Condition {
+  enum TagOp {
+    TAG_OP_UNSPECIFIED = 0;
+    // mặc định
+    OR = 1;
+    // cấm với MUTEX
+    AND = 2;
+  }
+
+  string attr = 1;
+  repeated string tags = 2;
+  TagOp tag_op = 3;
+
+  oneof window {
+    vision.catalog.v1.DateRange date_range = 4;
+    CustomDateRange custom_date_range = 5;
+  }
+
+  // Chỉ PARTIAL_VALUE (tuỳ chọn) và PARTIAL_VALUE_BY_TAG (bắt buộc).
+  optional vision.catalog.v1.ValueRange value_range = 6;
+}
+
+// Node của cây biểu thức: node lá có `condition`, node trong có `operator` + `children`.
+message Rule {
+  enum Operator {
+    OPERATOR_UNSPECIFIED = 0;
+    AND = 1;
+    OR = 2;
+    // con đầu trừ hợp các con còn lại
+    SUB = 3;
+  }
+
+  Operator operator = 1;
+  repeated Rule children = 2;
+  Condition condition = 3;
+}
+
+message Schedule {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    DAILY = 1;
+    ONCE = 2;
+  }
+
+  Type type = 1;
+}
+
+message Segment {
+  enum Serving {
+    SERVING_UNSPECIFIED = 0;
+    // mmap trong activation-api
+    ONLINE = 1;
+    // fallback StarRocks
+    OFFLINE = 2;
+  }
+
+  string segment_id = 1;
+  string name = 2;
+  Rule rule = 3;
+  Schedule schedule = 4;
+  Serving serving = 5;
+}

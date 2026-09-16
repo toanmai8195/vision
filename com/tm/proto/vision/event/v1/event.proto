@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+// Event đầu vào hệ thống (CLAUDE.md §3.2 "Input").
+package vision.event.v1;
+
+option go_package = "com.tm/vision/com/tm/proto/vision/event/v1;eventv1";
+option java_multiple_files = true;
+option java_package = "com.tm.vision.proto.event.v1";
+
+// MUTEX / NOT_MUTEX: signal ADD / REMOVE theo tag.
+message TagEvent {
+  repeated string tags_add = 1;
+  repeated string tags_remove = 2;
+}
+
+// PARTIAL_VALUE: một con số.
+message ValueEvent {
+  // chuỗi thập phân, vd "55000" hoặc "12.5"
+  string value = 1;
+}
+
+// PARTIAL_VALUE_BY_TAG: một con số gắn với một tag.
+message TagValueEvent {
+  string tag = 1;
+  // chuỗi thập phân
+  string value = 2;
+}
+
+message DataEvent {
+  // duy nhất toàn cục; dùng để dedup và phân định thứ tự khi trùng event_ts
+  string event_id = 1;
+  string user_id = 2;
+  // tên attribute trong catalog
+  string attr = 3;
+  // epoch millis UTC; `ds` được suy ra theo Asia/Ho_Chi_Minh
+  int64 event_ts_ms = 4;
+  // hệ thống nguồn, vd "payment"
+  string source = 5;
+
+  oneof payload {
+    TagEvent tag = 10;
+    ValueEvent value = 11;
+    TagValueEvent tag_value = 12;
+  }
+}

@@ -1,0 +1,10 @@
+load("//tools/rules:com_tm_container.bzl", "com_tm_py_image")
+
+#   bazel run //com/tm/src/ingest/simulator:simulator -- --users 100
+#   bazel run --config=linux-arm64 //com/tm/src/ingest/simulator:simulator_docker
+com_tm_py_image(
+    name = "simulator",
+    package_name = package_name(),
+    srcs = ["main.py"],
+    main = "main.py",
+)

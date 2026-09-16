@@ -1,0 +1,30 @@
+# Code Go/Java/Python sinh bằng các rule *_proto_library bên dưới → gazelle không sinh thêm.
+# gazelle:ignore
+
+load("@protobuf//bazel:java_proto_library.bzl", "java_proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("@protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@rules_go//proto:def.bzl", "go_proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "event_proto",
+    srcs = ["event.proto"],
+)
+
+go_proto_library(
+    name = "event_go_proto",
+    importpath = "com.tm/vision/com/tm/proto/vision/event/v1",
+    proto = ":event_proto",
+)
+
+java_proto_library(
+    name = "event_java_proto",
+    deps = [":event_proto"],
+)
+
+py_proto_library(
+    name = "event_py_proto",
+    deps = [":event_proto"],
+)

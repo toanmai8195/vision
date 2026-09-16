@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Service của vision (profile "apps")
+  - job_name: event_collector
+    static_configs:
+      - targets: ["event-collector:8080"]
+        labels: {component: event_collector}
+
+  - job_name: activation_api
+    static_configs:
+      - targets: ["activation-api:8080"]
+        labels: {component: activation_api}
+
+  - job_name: starrocks_fe
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["starrocks:8030"]
+        labels: {component: starrocks_fe}
+
+  - job_name: starrocks_be
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["starrocks:8040"]
+        labels: {component: starrocks_be}

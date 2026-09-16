@@ -1,0 +1,30 @@
+# Bazel
+bazel-*
+.bazel/
+.bazelrc.user
+
+# JVM
+*.class
+*.jar
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.ijwb/
+
+# OS
+.DS_Store
+
+# Local env
+.env
