@@ -1,0 +1,16 @@
+load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+
+# Sinh lại requirements_lock.txt sau khi sửa requirements.txt:
+#   bazel run //third_party/python:requirements.update
+compile_pip_requirements(
+    name = "requirements",
+    src = "requirements.txt",
+    requirements_txt = "requirements_lock.txt",
+    # Test so khớp lock cần tải index PyPI → cho phép mạng trong sandbox.
+    tags = ["requires-network"],
+)
+
+exports_files([
+    "requirements.txt",
+    "requirements_lock.txt",
+])

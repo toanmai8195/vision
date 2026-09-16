@@ -1,0 +1,19 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "validation",
+    srcs = ["validation.py"],
+    deps = ["//com/tm/proto/vision/catalog/v1:catalog_py_proto"],
+)
+
+py_test(
+    name = "validation_test",
+    srcs = ["validation_test.py"],
+    deps = [
+        ":validation",
+        "//com/tm/proto/vision/catalog/v1:catalog_py_proto",
+        "@pypi//pytest",
+    ],
+)

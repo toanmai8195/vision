@@ -1,0 +1,65 @@
+# =============================================================================
+# BAZEL CONFIGURATION
+# =============================================================================
+
+# Bzlmod is the default in Bazel 8, kept explicit for clarity.
+common --enable_bzlmod
+
+# =============================================================================
+# BUILD SETTINGS
+# =============================================================================
+
+build --verbose_failures
+build --show_progress
+# Sandbox by default, but fall back to local for actions that cannot be sandboxed
+# (e.g. the pip lock-file test, which needs network access).
+build --spawn_strategy=sandboxed,local
+
+# =============================================================================
+# JAVA / KOTLIN TOOLCHAIN
+# =============================================================================
+
+build --java_language_version=21
+build --java_runtime_version=remotejdk_21
+build --tool_java_language_version=21
+build --tool_java_runtime_version=remotejdk_21
+
+# =============================================================================
+# MACOS SPECIFIC
+# =============================================================================
+
+# rules_oci: CopyToDirectory and CopyFile can't run in darwin-sandbox
+build --strategy=CopyToDirectory=local
+build --strategy=CopyFile=local
+
+# =============================================================================
+# TEST SETTINGS
+# =============================================================================
+
+test --test_output=errors
+
+# =============================================================================
+# PLATFORM
+# =============================================================================
+
+# Build OCI images targeting linux/amd64 (required for Go: the binary inside the
+# image must be cross-compiled). Usage: bazel build --config=linux-amd64 //...
+build:linux-amd64 --platforms=//:linux_amd64
+
+# Build OCI images targeting linux/arm64.
+build:linux-arm64 --platforms=//:linux_arm64
+
+# =============================================================================
+# PROFILES
+# =============================================================================
+
+build:dev --compilation_mode=fastbuild
+
+build:release --compilation_mode=opt
+build:release --strip=always
+
+# =============================================================================
+# LOCAL OVERRIDES
+# =============================================================================
+
+try-import %workspace%/.bazelrc.user

@@ -1,0 +1,8 @@
+load("//tools/rules:com_tm_container.bzl", "com_tm_airflow_image")
+
+# DAG được bake vào image com.tm.airflow.vision:v1.0.0
+#   bazel run --config=linux-arm64 //com/tm/dags:vision_docker
+com_tm_airflow_image(
+    name = "vision",
+    srcs = glob(["*.py"]),
+)

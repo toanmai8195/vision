@@ -1,0 +1,3 @@
+# Dependency Python dùng chung toàn repo.
+# Thêm package ở đây rồi chạy: bazel run //third_party/python:requirements.update
+pytest==8.4.2

@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+// Catalog attribute / tag. Định nghĩa gốc: CLAUDE.md §3.
+package vision.catalog.v1;
+
+option go_package = "com.tm/vision/com/tm/proto/vision/catalog/v1;catalogv1";
+option java_multiple_files = true;
+option java_package = "com.tm.vision.proto.catalog.v1";
+
+// Bốn loại dữ liệu (CLAUDE.md §3.2). Mọi layer PHẢI xử lý đủ cả 4.
+enum DataType {
+  DATA_TYPE_UNSPECIFIED = 0;
+  // Mỗi lúc user có ≤ 1 tag; window lấy ADD gần nhất của cả attribute.
+  MUTEX = 1;
+  // Nhiều tag cùng lúc; window xét từng tag, signal gần nhất là ADD.
+  NOT_MUTEX = 2;
+  // Con số; window SUM rồi so valueRange.
+  PARTIAL_VALUE = 3;
+  // Con số gắn tag; window SUM riêng từng tag rồi so valueRange.
+  PARTIAL_VALUE_BY_TAG = 4;
+}
+
+// CLAUDE.md §3.4. Chỉ áp dụng cho MUTEX / NOT_MUTEX; PARTIAL_VALUE(_BY_TAG) luôn EVENT.
+enum FeedMode {
+  FEED_MODE_UNSPECIFIED = 0;
+  EVENT = 1;
+  STATE = 2;
+}
+
+// CLAUDE.md §3.3. Custom date range nằm ở segment.v1.CustomDateRange.
+enum DateRange {
+  DATE_RANGE_UNSPECIFIED = 0;
+  A1 = 1;
+  A7 = 2;
+  A15 = 3;
+  A30 = 4;
+  A60 = 5;
+  A90 = 6;
+  A120 = 7;
+  A180 = 8;
+  IN_MONTH = 9;
+  LAST_MONTH = 10;
+  ALWAYS_ACTIVE = 11;
+}
+
+// Khoảng giá trị. Số được giữ dạng chuỗi thập phân để không mất chính xác (DECIMAL(27,6)).
+// Thiếu `from_value` = -∞, thiếu `to_value` = +∞.
+message ValueRange {
+  optional string from_value = 1;
+  bool from_inclusive = 2;
+  optional string to_value = 3;
+  bool to_inclusive = 4;
+}
+
+message Attribute {
+  int32 id = 1;
+  // slug duy nhất, dùng trong DSL, vd "user_city"
+  string name = 2;
+  string description = 3;
+  DataType data_type = 4;
+  FeedMode feed_mode = 5;
+  repeated DateRange supported_date_ranges = 6;
+  // nhóm theo source table — đơn vị chạy job
+  int32 attr_group_id = 7;
+}
+
+message Tag {
+  int32 attr_id = 1;
+  // ≥ 1; 0 dành cho pseudo-tag __any__
+  int32 id = 2;
+  // slug duy nhất trong attribute, vd "hcm"
+  string name = 3;
+  // Chỉ PARTIAL_VALUE: bucket định sẵn.
+  optional ValueRange value_range = 4;
+}

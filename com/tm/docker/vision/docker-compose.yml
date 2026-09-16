@@ -1,0 +1,338 @@
+# =============================================================================
+# Vision — stack local (P0)
+#
+#   docker compose -f com/tm/docker/vision/docker-compose.yml up -d
+#   docker compose -f com/tm/docker/vision/docker-compose.yml --profile apps up -d   # + service vision
+#   com/tm/docker/vision/scripts/verify.sh
+#
+# Image service vision phải được load trước bằng Bazel (xem CLAUDE.md §8):
+#   bazel run --config=linux-arm64 //com/tm/dags:vision_docker
+#   bazel run --config=linux-arm64 //com/tm/src/ingest/collector:event_collector_docker
+#   bazel run --config=linux-arm64 //com/tm/src/activation/api:activation_api_docker
+# =============================================================================
+
+name: vision
+
+x-airflow-common: &airflow-common
+  image: com.tm.airflow.vision:v1.0.0
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://vision:vision@postgres:5432/airflow
+    AIRFLOW__METRICS__STATSD_ON: "true"
+    AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+    AIRFLOW__METRICS__STATSD_PORT: "9125"
+    AIRFLOW__METRICS__STATSD_PREFIX: airflow
+    VISION_META_DSN: postgresql://vision:vision@postgres:5432/vision_meta
+  volumes:
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    flyway:
+      condition: service_completed_successfully
+
+services:
+  # ---------------------------------------------------------------------------
+  # Metadata
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_USER: vision
+      POSTGRES_PASSWORD: vision
+      POSTGRES_DB: vision
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vision -d vision_meta"]
+      interval: 5s
+      retries: 20
+
+  flyway:
+    image: flyway/flyway:11.14.1
+    command: -url=jdbc:postgresql://postgres:5432/vision_meta -user=vision -password=vision -locations=filesystem:/flyway/sql -connectRetries=10 migrate
+    volumes:
+      - ../../src/sql/postgres/migrations:/flyway/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # Streaming
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      retries: 20
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for t in vision.src.payment_event.v1 vision.src.user_profile_cdc.v1 vision.src.user_product_cdc.v1 vision.segment.published.v1; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+        done
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
+  flink-jobmanager:
+    image: flink:1.20.2-scala_2.12-java17
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.port: 8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/overview"]
+      interval: 10s
+      retries: 20
+
+  flink-taskmanager:
+    image: flink:1.20.2-scala_2.12-java17
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Lakehouse
+  # ---------------------------------------------------------------------------
+  # Docker Hub không còn phát hành tag MinIO mới → pin digest bản đang có.
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      retries: 20
+
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/warehouse &&
+        mc mb --ignore-existing local/vision-segments
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  # TODO(verify): fixture dùng catalog SQLite in-memory → metadata Iceberg mất khi restart container.
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:1.9.2
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    ports:
+      - "8181:8181"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8181/v1/config || wget -qO- http://localhost:8181/v1/config"]
+      interval: 10s
+      retries: 20
+
+  spark-master:
+    image: apache/spark:3.5.6
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master --port 7077 --webui-port 8080
+    ports:
+      - "7077:7077"
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 >/dev/null"]
+      interval: 10s
+      retries: 20
+
+  spark-worker:
+    image: apache/spark:3.5.6
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --cores 2 --memory 2g
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Gold / serving store
+  # ---------------------------------------------------------------------------
+  starrocks:
+    image: starrocks/allin1-ubuntu:3.5.8
+    ports:
+      - "9030:9030"
+      - "8030:8030"
+      - "8040:8040"
+    volumes:
+      - starrocks-data:/data/deploy/starrocks
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 9030 -uroot --connect-timeout=5 -e \"SHOW BACKENDS\\G\" | grep -q 'Alive: true'"]
+      interval: 10s
+      retries: 60
+
+  starrocks-init:
+    image: starrocks/allin1-ubuntu:3.5.8
+    entrypoint: ["/bin/sh", "-c", "mysql -h starrocks -P 9030 -uroot --connect-timeout=10 < /init/init.sql"]
+    volumes:
+      - ./starrocks:/init:ro
+    depends_on:
+      starrocks:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_healthy
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Orchestration
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create -u admin -p admin -f Admin -l Admin -r Admin -e admin@example.com || true
+    restart: "no"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      retries: 10
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8088:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health"]
+      interval: 30s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Observability
+  # ---------------------------------------------------------------------------
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.28.0
+    ports:
+      - "9102:9102"
+
+  pushgateway:
+    image: prom/pushgateway:v1.11.1
+    ports:
+      - "9091:9091"
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready"]
+      interval: 10s
+      retries: 20
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health"]
+      interval: 10s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # Service vision (profile "apps") — image load bằng Bazel
+  # ---------------------------------------------------------------------------
+  event-collector:
+    profiles: ["apps"]
+    image: com.tm.go.event_collector:v1.0.0
+    ports:
+      - "18080:8080"
+
+  activation-api:
+    profiles: ["apps"]
+    image: com.tm.kt.activation_api:v1.0.0
+    ports:
+      - "18081:8080"
+
+volumes:
+  postgres-data:
+  kafka-data:
+  minio-data:
+  starrocks-data:
+  airflow-logs:

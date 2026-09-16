@@ -1,0 +1,173 @@
+module(
+    name = "vision",
+    version = "1.0.0",
+)
+
+# =============================================================================
+# CORE
+# =============================================================================
+bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+
+# =============================================================================
+# PROTOBUF
+# =============================================================================
+# Contract dùng chung Go / Kotlin / Python: //com/tm/proto/vision/...
+bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "protobuf", version = "29.3")
+
+# =============================================================================
+# JAVA / KOTLIN
+# =============================================================================
+bazel_dep(name = "rules_java", version = "8.14.0")
+bazel_dep(name = "rules_jvm_external", version = "6.7")
+
+# Vert.x 5.1.x được biên dịch bằng Kotlin 2.3 → cần rules_kotlin mang compiler đủ mới.
+bazel_dep(name = "rules_kotlin", version = "2.4.10")
+
+VERTX_VERSION = "5.1.8"
+
+DAGGER_VERSION = "2.60.1"
+
+# Sau khi sửa `artifacts`: bazel run @maven//:pin
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "maven",
+    artifacts = [
+        "io.vertx:vertx-core:%s" % VERTX_VERSION,
+        "io.vertx:vertx-web:%s" % VERTX_VERSION,
+        "io.vertx:vertx-lang-kotlin:%s" % VERTX_VERSION,
+        "io.vertx:vertx-lang-kotlin-coroutines:%s" % VERTX_VERSION,
+        "io.vertx:vertx-micrometer-metrics:%s" % VERTX_VERSION,
+        "io.vertx:vertx-web-client:%s" % VERTX_VERSION,
+        "io.micrometer:micrometer-core:1.16.7",
+        "io.micrometer:micrometer-registry-prometheus:1.16.7",
+        "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2",
+        "com.google.dagger:dagger:%s" % DAGGER_VERSION,
+        "com.google.dagger:dagger-compiler:%s" % DAGGER_VERSION,
+        "javax.inject:javax.inject:1",
+        "org.roaringbitmap:RoaringBitmap:1.6.23",
+        "com.github.ben-manes.caffeine:caffeine:3.2.4",
+        "org.slf4j:slf4j-api:2.0.17",
+        "org.slf4j:slf4j-simple:2.0.17",
+        "junit:junit:4.13.2",
+    ],
+    fail_if_repin_required = True,
+    lock_file = "//:maven_install.json",
+    repositories = [
+        "https://repo1.maven.org/maven2",
+    ],
+)
+use_repo(maven, "maven")
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+bazel_dep(name = "rules_python", version = "1.5.4")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.11",
+)
+
+# Thêm package vào //third_party/python:requirements.txt rồi chạy:
+#   bazel run //third_party/python:requirements.update
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pypi",
+    python_version = "3.11",
+    requirements_lock = "//third_party/python:requirements_lock.txt",
+)
+use_repo(pip, "pypi")
+
+# =============================================================================
+# GO
+# =============================================================================
+bazel_dep(name = "rules_go", version = "0.53.0")
+bazel_dep(name = "gazelle", version = "0.42.0")
+
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.24.1")
+
+# Sau khi sửa //:go.mod: bazel run //:gazelle
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_mod = "//:go.mod")
+use_repo(
+    go_deps,
+    "com_github_prometheus_client_golang",
+    "org_golang_google_protobuf",
+)
+
+# =============================================================================
+# OCI / CONTAINER
+# =============================================================================
+bazel_dep(name = "rules_oci", version = "2.2.6")
+bazel_dep(name = "tar.bzl", version = "0.3.0")
+
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+
+# JVM (Kotlin): Temurin JRE 21
+oci.pull(
+    name = "java_base",
+    digest = "sha256:273396ed5998598ed1091e8d72711c2d36980a0e65103859c55a4e977a41ffd3",
+    image = "docker.io/library/eclipse-temurin",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+    tag = "21-jre",
+)
+
+# Python 3.11
+oci.pull(
+    name = "python_base",
+    digest = "sha256:9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634",
+    image = "docker.io/library/python",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+    tag = "3.11-slim",
+)
+
+# Go: binary static (CGO off) trên alpine
+oci.pull(
+    name = "go_base",
+    digest = "sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d",
+    image = "docker.io/library/alpine",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+    tag = "3.21",
+)
+
+# Airflow 2.10.4 (python 3.11) — DAG được bake vào image
+oci.pull(
+    name = "airflow_base",
+    digest = "sha256:5afa55b7c6087112770605f9b9851afd665f5c7f3719b390fcb4bd28a47a7f9a",
+    image = "docker.io/apache/airflow",
+    # index của apache/airflow khai báo "linux/arm64" (không có variant v8)
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+    tag = "2.10.4-python3.11",
+)
+
+use_repo(
+    oci,
+    "airflow_base",
+    "airflow_base_linux_amd64",
+    "airflow_base_linux_arm64",
+    "go_base",
+    "go_base_linux_amd64",
+    "go_base_linux_arm64_v8",
+    "java_base",
+    "java_base_linux_amd64",
+    "java_base_linux_arm64_v8",
+    "python_base",
+    "python_base_linux_amd64",
+    "python_base_linux_arm64_v8",
+)
