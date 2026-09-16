@@ -1,6 +1,0 @@
-schema_version: "1"
-
-# Phase 4: runtime local (Docker)
-# Phase 5: cập nhật sang runtime kubernetes (k3s)
-grove:
-  worktree: ./com.tm.vision/workspace
