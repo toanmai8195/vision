@@ -1,0 +1,86 @@
+# Golden: com/tm/docs/data-flow-examples.md §2 — S2 CDC (feedMode STATE).
+# Input = silver SCD2: user giữ tag trong [from, to), thiếu `to` = hiện tại.
+# history_start = ngày bootstrap: STATE(history_start) nạp snapshot (ADDED = STATE).
+
+cases:
+  # §2.1 user_city (MUTEX, STATE)
+  - name: user_city
+    attribute:
+      id: 201
+      name: user_city
+      data_type: MUTEX
+      feed_mode: STATE
+      tags: {hcm: 1, hn: 2}
+      supported_date_ranges: [A1, A7, A30, ALWAYS_ACTIVE]
+    ds: 2026-09-15
+    history_start: 2026-08-01
+    universe: [1, 2, 3, 4]
+    intervals:
+      - {uidx: 1, tag: hcm, from: 2025-01-10, to: 2026-09-15}
+      - {uidx: 1, tag: hn, from: 2026-09-15}
+      - {uidx: 2, tag: hcm, from: 2026-09-15}
+      - {uidx: 3, tag: hn, from: 2024-06-01}
+    expected:
+      state_daily:
+        - {ds: 2026-09-14, tag: hcm, added: [], removed: [], state: [1]}
+        - {ds: 2026-09-14, tag: hn, added: [], removed: [], state: [3]}
+        - {ds: 2026-09-15, tag: hcm, added: [2], removed: [1], state: [2]}
+        - {ds: 2026-09-15, tag: hn, added: [1], removed: [], state: [1, 3]}
+      ranges:
+        A1: {hcm: [2], hn: [1, 3]}
+        A7: {hcm: [2], hn: [1, 3]}
+        A30: {hcm: [2], hn: [1, 3]}
+        ALWAYS_ACTIVE: {hcm: [2], hn: [1, 3]}
+      custom:
+        # STATE(09-10) = checkpoint Chủ nhật 09-06 + delta 09-07..09-10
+        - {from: 2026-09-01, to: 2026-09-10, tags: {hcm: [1], hn: [3]}}
+
+  # §2.1 "So sánh": cùng dữ liệu city nhưng nạp như EVENT (chỉ có signal khi CDC đổi) → U1003 rơi khỏi A30.
+  - name: user_city_as_event
+    attribute:
+      id: 201
+      name: user_city
+      data_type: MUTEX
+      feed_mode: EVENT
+      tags: {hcm: 1, hn: 2}
+      supported_date_ranges: [A30]
+    ds: 2026-09-15
+    history_start: 2024-06-01
+    universe: [1, 2, 3, 4]
+    tag_events:
+      - {uidx: 3, day: 2024-06-01, add: [hn]}
+      - {uidx: 1, day: 2025-01-10, add: [hcm]}
+      - {uidx: 1, day: 2026-09-15, add: [hn]}
+      - {uidx: 2, day: 2026-09-15, add: [hcm]}
+    expected:
+      ranges:
+        A30: {hcm: [2], hn: [1]}
+
+  # §2.2 product_holding (NOT_MUTEX, STATE). Doc chỉ nói "trước 09-15" → ngày bắt đầu chọn tuỳ ý trong tháng 8.
+  - name: product_holding
+    attribute:
+      id: 202
+      name: product_holding
+      data_type: NOT_MUTEX
+      feed_mode: STATE
+      tags: {paylater: 1, insurance: 2}
+      supported_date_ranges: [A1, A7, A30, ALWAYS_ACTIVE]
+    ds: 2026-09-15
+    history_start: 2026-08-01
+    universe: [1, 2, 3, 4]
+    intervals:
+      - {uidx: 1, tag: paylater, from: 2026-08-10, to: 2026-09-15}
+      - {uidx: 1, tag: insurance, from: 2026-08-10}
+      - {uidx: 2, tag: paylater, from: 2026-08-20}
+      - {uidx: 3, tag: insurance, from: 2026-09-15}
+    expected:
+      state_daily:
+        - {ds: 2026-09-14, tag: paylater, added: [], removed: [], state: [1, 2]}
+        - {ds: 2026-09-14, tag: insurance, added: [], removed: [], state: [1]}
+        - {ds: 2026-09-15, tag: paylater, added: [], removed: [1], state: [2]}
+        - {ds: 2026-09-15, tag: insurance, added: [3], removed: [], state: [1, 3]}
+      ranges:
+        A1: {paylater: [2], insurance: [1, 3]}
+        A7: {paylater: [2], insurance: [1, 3]}
+        A30: {paylater: [2], insurance: [1, 3]}
+        ALWAYS_ACTIVE: {paylater: [2], insurance: [1, 3]}

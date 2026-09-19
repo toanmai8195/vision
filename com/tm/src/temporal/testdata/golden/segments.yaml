@@ -1,0 +1,37 @@
+# Golden: com/tm/docs/data-flow-examples.md §5 — L6 Segment, as-of 2026-09-15.
+# `sources`: attribute name → golden case (s1_payment / s2_cdc / s3_churn) cung cấp bitmap/SUM.
+
+ds: 2026-09-15
+sources:
+  churn_score_band: churn_score_band
+  user_city: user_city
+  txn_category: txn_category
+  txn_amount: txn_amount
+  txn_amount_by_category: txn_amount_by_category
+
+segments:
+  - segment_id: seg_1001  # Churn mid/high A30, ở HN, không mua F&B 7 ngày
+    rule:
+      operator: SUB
+      children:
+        - operator: AND
+          children:
+            - condition: {attr: churn_score_band, tags: [mid, high], tagOp: OR, dateRange: A30}
+            - condition: {attr: user_city, tags: [hn], dateRange: A7}
+        - condition: {attr: txn_category, tags: [fnb], dateRange: A7}
+    steps:
+      - {rule: "children[0].children[0]", result: [1, 2, 3, 4]}
+      - {rule: "children[0].children[1]", result: [1, 3]}
+      - {rule: "children[1]", result: [1, 2]}
+    result: [3]
+
+  - segment_id: seg_1002  # Chi tiêu lớn 7 ngày
+    rule:
+      operator: OR
+      children:
+        - condition: {attr: txn_amount, dateRange: A7, valueRange: {fromValue: "1000000", fromInclusive: true}}
+        - condition: {attr: txn_amount_by_category, tags: [fnb], dateRange: A7, valueRange: {fromValue: "500000", fromInclusive: true}}
+    steps:
+      - {rule: "children[0]", result: [1]}
+      - {rule: "children[1]", result: [2]}
+    result: [1, 2]

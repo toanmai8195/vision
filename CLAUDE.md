@@ -333,8 +333,8 @@ vision/
     │   ├── ingest/{collector(Go),flink(SQL),simulator(Py)}/
     │   ├── batch/{silver,dictionary}/            # PySpark
     │   ├── sql/starrocks/{ddl,daily,dq}/
-    │   ├── temporal/                             # planner, reference, testdata/golden
-    │   ├── segment/{manager(Kt),builder(Go)}/
+    │   ├── temporal/                             # model, blocks, latest, ranges, planner, engine, reference, testdata/golden
+    │   ├── segment/{manager(Kt),builder(Go),dsl(Py)}/   # dsl: validate + evaluator tham chiếu
     │   ├── activation/api/                       # Kotlin
     │   ├── common/{go,kotlin,python}/            # bitmapcodec, config, metrics, catalog client
     │   └── observability/{prometheus,grafana}/

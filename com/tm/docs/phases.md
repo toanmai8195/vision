@@ -59,20 +59,27 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 **Mục tiêu**: khoá đúng semantics trước khi viết SQL. Không cần StarRocks/Spark.
 
 **Việc cần làm**
-- [ ] `com/tm/src/temporal/reference.py`: cách tính ngây thơ theo định nghĩa `CLAUDE.md` §3.2 cho 4 loại (duyệt event trong window, signal gần nhất, SUM), bitmap bằng `pyroaring`.
-- [ ] `com/tm/src/temporal/model.py`: reduce ngày (§4.1) → `ADD/DEL/SIG`, `ADDED/REMOVED/STATE`, `pv_daily`.
-- [ ] `blocks.py`: dyadic block build + greedy decomposition (§4.2).
-- [ ] `latest.py`: `LATEST`, `POS`, `STATE`, checkpoint + forward-fold (§4.3).
-- [ ] `ranges.py`: A1…A180, IN_MONTH, LAST_MONTH, ALWAYS_ACTIVE, CUSTOM cho 4 loại.
-- [ ] `planner.py` (khung): `(ds, attribute)` → danh sách bước (chưa sinh SQL thật).
-- [ ] Golden test từ `data-flow-examples.md` (`testdata/golden/*.yaml`).
-- [ ] Property test (hypothesis): implementation tối ưu == reference; ≤ 400 ngày, REMOVE xen kẽ, late data, cả EVENT/STATE.
-- [ ] Segment evaluator thuần (AND/OR/SUB, tagOp, valueRange) + DSL validate matrix.
+- [x] `com/tm/src/temporal/reference.py`: cách tính ngây thơ theo định nghĩa `CLAUDE.md` §3.2 cho 4 loại (duyệt event trong window, signal gần nhất, SUM), bitmap bằng `pyroaring`.
+- [x] `com/tm/src/temporal/model.py`: reduce ngày (§4.1) → `ADD/DEL/SIG`, `ADDED/REMOVED/STATE`, `pv_daily`.
+- [x] `blocks.py`: dyadic block build + greedy decomposition (§4.2).
+- [x] `latest.py`: `LATEST`, `POS`, `STATE`, checkpoint + forward-fold (§4.3).
+- [x] `ranges.py`: A1…A180, IN_MONTH, LAST_MONTH, ALWAYS_ACTIVE, CUSTOM cho 4 loại.
+- [x] `planner.py` (khung): `(ds, attribute)` → danh sách bước (chưa sinh SQL thật).
+- [x] Golden test từ `data-flow-examples.md` (`testdata/golden/*.yaml`).
+- [x] Property test (hypothesis): implementation tối ưu == reference; ≤ 400 ngày, REMOVE xen kẽ, late data, cả EVENT/STATE.
+- [x] Segment evaluator thuần (AND/OR/SUB, tagOp, valueRange) + DSL validate matrix.
 
 **Done khi**
-- Golden pass cho: churn & city (MUTEX), txn_category & product_holding (NOT_MUTEX), txn_amount (PARTIAL_VALUE), txn_amount_by_category (PARTIAL_VALUE_BY_TAG), ca biên REMOVE.
-- Property test pass ≥ 10K case/loại.
-- `seg_1001 = {3}`, `seg_1002 = {1,2}` tính bằng evaluator thuần.
+- [x] Golden pass cho: churn & city (MUTEX), txn_category & product_holding (NOT_MUTEX), txn_amount (PARTIAL_VALUE), txn_amount_by_category (PARTIAL_VALUE_BY_TAG), ca biên REMOVE.
+- [x] Property test pass ≥ 10K case/loại.
+- [x] `seg_1001 = {3}`, `seg_1002 = {1,2}` tính bằng evaluator thuần.
+
+**Đã làm** (code ở `com/tm/src/temporal/`, `com/tm/src/segment/dsl/`)
+- `engine.py` chạy các bước của `planner.py` trong bộ nhớ (daily → block → LATEST/POS/STATE → checkpoint → range → DQ);
+  property test so engine với `reference.py`, nên planner cũng được kiểm. `testing.py` mô phỏng pipeline hằng ngày có late data ≤ 3 ngày.
+- Golden: `testdata/golden/{s1_payment,s2_cdc,s3_churn,data_types,segments,blocks}.yaml` (data-flow-examples + data-types).
+- Property test: `bazel test //com/tm/src/temporal:property_test_<kind>` — 6 target (4 loại × EVENT/STATE), mỗi target 10K case.
+- `TODO(verify)`: PARTIAL_VALUE có cả `tags` lẫn `valueRange` → hiện từ chối (chưa định nghĩa nghĩa).
 
 ---
 

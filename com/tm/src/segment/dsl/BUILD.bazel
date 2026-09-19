@@ -1,0 +1,41 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+# Segment DSL: validate theo catalog + evaluator thuần (CLAUDE.md §6.1). Bản tham chiếu cho
+# segment-manager (Kotlin) và segment-builder (Go) ở P5.
+py_library(
+    name = "dsl",
+    srcs = [
+        "evaluator.py",
+        "validate.py",
+    ],
+    deps = [
+        "//com/tm/proto/vision/segment/v1:segment_py_proto",
+        "//com/tm/src/temporal",
+        "@pypi//pyroaring",
+    ],
+)
+
+py_test(
+    name = "validate_test",
+    srcs = ["validate_test.py"],
+    deps = [
+        ":dsl",
+        "//com/tm/proto/vision/segment/v1:segment_py_proto",
+        "//com/tm/src/temporal",
+        "@pypi//pytest",
+    ],
+)
+
+py_test(
+    name = "evaluator_test",
+    srcs = ["evaluator_test.py"],
+    deps = [
+        ":dsl",
+        "//com/tm/proto/vision/segment/v1:segment_py_proto",
+        "//com/tm/src/temporal",
+        "@pypi//pyroaring",
+        "@pypi//pytest",
+    ],
+)

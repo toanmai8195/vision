@@ -1,0 +1,115 @@
+# Golden: com/tm/docs/data-flow-examples.md §1 — S1 payment_event (NOT_MUTEX + PARTIAL_VALUE + PARTIAL_VALUE_BY_TAG).
+# Input = silver.payment_txn sau dedup (e-9001 duplicate đã bỏ) + tag rule mcc (chỉ SUCCESS: e-9004 FAILED bị loại):
+#   5812,5814 → fnb · 4722 → travel · 4900 → bill.
+# e-9003: 2026-09-14T18:30Z = 01:30 ICT ngày 15 → ds 2026-09-15.
+# e-9005: ds 2026-09-14, tới muộn vào ngày chạy 2026-09-15 → reprocess ds 09-14.
+# Đổi semantics → sửa doc + file này cùng commit (CLAUDE.md §13.4).
+
+cases:
+  - name: txn_category
+    attribute:
+      id: 101
+      name: txn_category
+      data_type: NOT_MUTEX
+      feed_mode: EVENT
+      tags: {fnb: 1, travel: 2, bill: 3}
+      supported_date_ranges: [A1, A7, A30, ALWAYS_ACTIVE]
+    ds: 2026-09-15
+    history_start: 2026-09-01
+    universe: [1, 2, 3, 4]
+    tag_events:
+      - {event_id: e-8001, uidx: 2, ts: "2026-09-10T05:00:00Z", add: [fnb]}
+      - {event_id: e-9001, uidx: 1, ts: "2026-09-15T03:02:11Z", add: [fnb]}
+      - {event_id: e-9002, uidx: 1, ts: "2026-09-15T05:10:00Z", add: [travel]}
+      - {event_id: e-9003, uidx: 2, ts: "2026-09-14T18:30:00Z", add: [fnb]}
+      - {event_id: e-9005, uidx: 3, ts: "2026-09-14T09:00:00Z", add: [bill], arrival: 2026-09-15}
+    expected:
+      tag_daily:
+        - {ds: 2026-09-10, tag: fnb, add: [2], del: [], sig: [2]}
+        - {ds: 2026-09-14, tag: bill, add: [3], del: [], sig: [3]}
+        - {ds: 2026-09-15, tag: fnb, add: [1, 2], del: [], sig: [1, 2]}
+        - {ds: 2026-09-15, tag: travel, add: [1], del: [], sig: [1]}
+      blocks:  # SIG(·,t); A7 = B0[09-09] ⊕ B1[09-10..11] ⊕ B2[09-12..15]
+        - {from: 2026-09-09, to: 2026-09-09, tags: {}}
+        - {from: 2026-09-10, to: 2026-09-11, tags: {fnb: [2]}}
+        - {from: 2026-09-12, to: 2026-09-15, tags: {fnb: [1, 2], travel: [1], bill: [3]}}
+      latest:  # POS
+        - {ds: 2026-09-15, tags: {fnb: [1, 2], travel: [1], bill: [3]}}
+      ranges:
+        A1: {fnb: [1, 2], travel: [1]}
+        A7: {fnb: [1, 2], travel: [1], bill: [3]}
+
+  - name: txn_amount
+    attribute:
+      id: 102
+      name: txn_amount
+      data_type: PARTIAL_VALUE
+      feed_mode: EVENT
+      tags:
+        lt_500k: {id: 1, value_range: {from: 0, to: 500000}}
+        500k_2m: {id: 2, value_range: {from: 500000, to: 2000000}}
+        gte_2m: {id: 3, value_range: {from: 2000000}}
+      supported_date_ranges: [A1, A7, A30, ALWAYS_ACTIVE]
+    ds: 2026-09-15
+    history_start: 2026-09-01
+    universe: [1, 2, 3, 4]
+    value_events:
+      - {event_id: e-8001, uidx: 2, ts: "2026-09-10T05:00:00Z", value: "600000"}
+      - {event_id: e-9001, uidx: 1, ts: "2026-09-15T03:02:11Z", value: "55000"}
+      - {event_id: e-9002, uidx: 1, ts: "2026-09-15T05:10:00Z", value: "1200000"}
+      - {event_id: e-9003, uidx: 2, ts: "2026-09-14T18:30:00Z", value: "45000"}
+      - {event_id: e-9005, uidx: 3, ts: "2026-09-14T09:00:00Z", value: "350000", arrival: 2026-09-15}
+    expected:
+      pv_daily:
+        - {ds: 2026-09-10, uidx: 2, value: "600000"}
+        - {ds: 2026-09-14, uidx: 3, value: "350000"}
+        - {ds: 2026-09-15, uidx: 1, value: "1255000"}
+        - {ds: 2026-09-15, uidx: 2, value: "45000"}
+      pv_range_value:
+        A7:
+          - {uidx: 1, value: "1255000"}
+          - {uidx: 2, value: "645000"}
+          - {uidx: 3, value: "350000"}
+      ranges:
+        A1: {lt_500k: [2], 500k_2m: [1]}
+        A7: {lt_500k: [3], 500k_2m: [1, 2]}
+      conditions:
+        - condition: {attr: txn_amount, dateRange: A7, valueRange: {fromValue: "1000000", fromInclusive: true}}
+          result: [1]
+
+  - name: txn_amount_by_category
+    attribute:
+      id: 103
+      name: txn_amount_by_category
+      data_type: PARTIAL_VALUE_BY_TAG
+      feed_mode: EVENT
+      tags: {fnb: 1, travel: 2, bill: 3}
+      supported_date_ranges: [A1, A7, A30, ALWAYS_ACTIVE]
+    ds: 2026-09-15
+    history_start: 2026-09-01
+    universe: [1, 2, 3, 4]
+    value_events:
+      - {event_id: e-8001, uidx: 2, ts: "2026-09-10T05:00:00Z", tag: fnb, value: "600000"}
+      - {event_id: e-9001, uidx: 1, ts: "2026-09-15T03:02:11Z", tag: fnb, value: "55000"}
+      - {event_id: e-9002, uidx: 1, ts: "2026-09-15T05:10:00Z", tag: travel, value: "1200000"}
+      - {event_id: e-9003, uidx: 2, ts: "2026-09-14T18:30:00Z", tag: fnb, value: "45000"}
+      - {event_id: e-9005, uidx: 3, ts: "2026-09-14T09:00:00Z", tag: bill, value: "350000", arrival: 2026-09-15}
+    expected:
+      pv_daily:
+        - {ds: 2026-09-10, tag: fnb, uidx: 2, value: "600000"}
+        - {ds: 2026-09-14, tag: bill, uidx: 3, value: "350000"}
+        - {ds: 2026-09-15, tag: fnb, uidx: 1, value: "55000"}
+        - {ds: 2026-09-15, tag: travel, uidx: 1, value: "1200000"}
+        - {ds: 2026-09-15, tag: fnb, uidx: 2, value: "45000"}
+      pv_range_value:
+        A7:
+          - {tag: fnb, uidx: 1, value: "55000"}
+          - {tag: travel, uidx: 1, value: "1200000"}
+          - {tag: fnb, uidx: 2, value: "645000"}
+          - {tag: bill, uidx: 3, value: "350000"}
+      ranges:  # không có bucket định sẵn
+        A1: {}
+        A7: {}
+      conditions:
+        - condition: {attr: txn_amount_by_category, tags: [fnb], dateRange: A7, valueRange: {fromValue: "500000", fromInclusive: true}}
+          result: [2]

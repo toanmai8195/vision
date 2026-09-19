@@ -1,0 +1,4 @@
+# Python: ruff + pytest (CLAUDE.md §11).
+[lint]
+# Công thức window trong CLAUDE.md §4 dùng `[l, r]` — giữ tên biến `l` cho khớp.
+ignore = ["E741"]
