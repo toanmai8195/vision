@@ -27,6 +27,26 @@ enum FeedMode {
   STATE = 2;
 }
 
+// CLAUDE.md §3.2.1. Hàm aggregate của PARTIAL_VALUE(_BY_TAG); loại khác để UNSPECIFIED.
+// Chỉ nhận hàm ghép được qua dyadic block (không cần phép trừ).
+enum AggFunc {
+  AGG_FUNC_UNSPECIFIED = 0;
+  SUM = 1;
+  // số event, bỏ qua `value`
+  COUNT = 2;
+  MIN = 3;
+  MAX = 4;
+}
+
+// CLAUDE.md §3.6. Tag khai báo sẵn trong catalog (STANDARD) hay chuỗi tự do cardinality cao (EXTENDED).
+enum AttributeType {
+  // coi như STANDARD
+  ATTRIBUTE_TYPE_UNSPECIFIED = 0;
+  STANDARD = 1;
+  // chỉ NOT_MUTEX và PARTIAL_VALUE_BY_TAG; tag_string → tag_id qua silver.tag_dict
+  EXTENDED = 2;
+}
+
 // CLAUDE.md §3.3. Custom date range nằm ở segment.v1.CustomDateRange.
 enum DateRange {
   DATE_RANGE_UNSPECIFIED = 0;
@@ -62,6 +82,9 @@ message Attribute {
   repeated DateRange supported_date_ranges = 6;
   // nhóm theo source table — đơn vị chạy job
   int32 attr_group_id = 7;
+  // chỉ PARTIAL_VALUE(_BY_TAG); UNSPECIFIED = SUM
+  AggFunc agg_func = 8;
+  AttributeType attribute_type = 9;
 }
 
 message Tag {

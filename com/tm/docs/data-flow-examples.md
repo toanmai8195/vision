@@ -324,3 +324,43 @@ POST /v1/segments/contains   {"userIds":["U1001","U1003"],"segmentIds":["seg_100
 POST /v1/segments/seg_1002/exports
 → 202 {"exportId":"exp_77","status":"RUNNING"}
 ```
+
+---
+
+## 7. Mở rộng P1b: `aggFunc` và `EXTENDED`
+
+Ví dụ chi tiết ở `data-types.md` §5–§6; golden: `com/tm/src/temporal/testdata/golden/p1b_aggfunc_extended.yaml`.
+
+### 7.1 `pv_daily` theo `aggFunc` (user Chi, ngày 15/09: 200K và 100K)
+
+| aggFunc | `pv_daily(15/09)` | ⊕ khi ghép block | A7 |
+|---|---|---|---|
+| SUM | 300000 | `+` | 600000 |
+| COUNT | 2 | `+` | 3 |
+| MIN | 100000 | `min` | 100000 |
+| MAX | 200000 | `max` | 300000 |
+
+### 7.2 EXTENDED — dữ liệu qua từng layer (`oa_follow`)
+
+| Layer | Dữ liệu |
+|---|---|
+| L2 `silver.tag_dict` | `oa_12345 → 1`, `oa_777 → 2`, `oa_999 → 3` (cấp theo thứ tự gặp, append-only) |
+| L3 `tag_daily` | 09-10: `ADD(1) = {2}`, `ADD(2) = {2}` · 09-13: `DEL(1) = {1}` · 09-14: `ADD(3) = {3}` |
+| L4 `POS` | chỉ cập nhật tag có signal trong ngày |
+| `meta.condition_usage` | `(oa_follow, oa_12345, A7)`, `(oa_follow, oa_12345, A30)`, `(oa_follow, oa_777, A30)` |
+| L5 `tag_range_bitmap` | A7: `oa_12345 → {2}` · A30: `oa_12345 → {2}`, `oa_777 → {2}` — **không** có `oa_999` |
+| Segment dùng `oa_999` A7 | on-demand: `POS(r) ∩ SIG_window` → `{3}`; ghi `condition_usage` → ngày sau precompute |
+
+### 7.3 seg_1003 — "nhận quà ≥ 100K trong 7 ngày, trừ người đang follow OA oa_12345"
+```json
+{"operator": "SUB", "children": [
+  {"condition": {"attr": "gift_value", "tags": ["gift_abc", "gift_xyz"], "tagOp": "OR", "dateRange": "A7",
+                 "valueRange": {"fromValue": "100000", "fromInclusive": true}}},
+  {"condition": {"attr": "oa_follow", "tags": ["oa_12345"], "dateRange": "A7"}}
+]}
+```
+| Bước | Bitmap |
+|---|---|
+| c1 gift_abc ∪ gift_xyz ≥ 100K (A7) | {1} ∪ {2} = {1,2} |
+| c2 follow oa_12345 (A7) | {2} |
+| `c1 − c2` | **{1}** |

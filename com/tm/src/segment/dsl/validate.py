@@ -8,6 +8,7 @@
 | PARTIAL_VALUE_BY_TAG | bắt buộc | cho phép | bắt buộc |
 
 `dateRange` phải thuộc `supportedDateRanges`; `customDateRange`: `from ≤ to ≤ ds`, `from ≥ ds − 399`.
+Tag: STANDARD phải thuộc catalog; EXTENDED là chuỗi tự do (§3.6), không kiểm catalog.
 Cách tính suy ra từ `dataType` của attribute — DSL không có field `mode`.
 """
 
@@ -80,7 +81,10 @@ def validate_condition(cond: Condition, catalog: Catalog, ds: int | None = None,
     if len(set(cond.tags)) != len(cond.tags):
         raise DslError(path, "duplicate tag")
     for name in cond.tags:
-        if name not in attr.tags:
+        if attr.is_extended:
+            if not name:
+                raise DslError(path, "empty EXTENDED tag")
+        elif name not in attr.tags:
             raise DslError(path, f"unknown tag {name!r} of {attr.name}")
     if cond.tag_op not in (TagOp.TAG_OP_UNSPECIFIED, TagOp.OR, TagOp.AND):
         raise DslError(path, f"unknown tag_op {cond.tag_op}")

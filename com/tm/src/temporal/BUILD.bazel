@@ -59,6 +59,7 @@ filegroup(
     )
     for name in [
         "blocks_test",
+        "engine_test",
         "latest_test",
         "model_test",
         "planner_test",
@@ -80,14 +81,40 @@ py_test(
     ],
 )
 
-# Property test: engine (planner → daily → block → LATEST → range) == reference, ≥ 10K case / loại.
-# Mỗi (dataType, feedMode) một target để chạy song song.
+# Property test: engine (planner → daily → block → LATEST → range) == reference, ≥ 10K case / tổ hợp.
+# Mỗi tổ hợp (kind, aggFunc, attributeType) một target để chạy song song.
+PROPERTY_COMBOS = [
+    # P1: 4 loại × EVENT/STATE (aggFunc SUM, STANDARD)
+    ("MUTEX_EVENT", "SUM", "STANDARD"),
+    ("MUTEX_STATE", "SUM", "STANDARD"),
+    ("NOT_MUTEX_EVENT", "SUM", "STANDARD"),
+    ("NOT_MUTEX_STATE", "SUM", "STANDARD"),
+    ("PARTIAL_VALUE", "SUM", "STANDARD"),
+    ("PARTIAL_VALUE_BY_TAG", "SUM", "STANDARD"),
+    # P1b: aggFunc COUNT / MIN / MAX
+    ("PARTIAL_VALUE", "COUNT", "STANDARD"),
+    ("PARTIAL_VALUE", "MIN", "STANDARD"),
+    ("PARTIAL_VALUE", "MAX", "STANDARD"),
+    ("PARTIAL_VALUE_BY_TAG", "COUNT", "STANDARD"),
+    ("PARTIAL_VALUE_BY_TAG", "MIN", "STANDARD"),
+    ("PARTIAL_VALUE_BY_TAG", "MAX", "STANDARD"),
+    # P1b: EXTENDED (usage-driven)
+    ("NOT_MUTEX_EVENT", "SUM", "EXTENDED"),
+    ("NOT_MUTEX_STATE", "SUM", "EXTENDED"),
+    ("PARTIAL_VALUE_BY_TAG", "SUM", "EXTENDED"),
+]
+
 [
     py_test(
-        name = "property_test_" + kind.lower(),
+        # P1 giữ tên cũ: property_test_<kind>; P1b thêm hậu tố _<agg> / _extended
+        name = "property_test_" + kind.lower() + ("" if agg == "SUM" else "_" + agg.lower()) + ("_extended" if attr_type == "EXTENDED" else ""),
         size = "large",
         srcs = ["property_test.py"],
-        env = {"PROPERTY_KIND": kind},
+        env = {
+            "PROPERTY_AGG": agg,
+            "PROPERTY_ATTR_TYPE": attr_type,
+            "PROPERTY_KIND": kind,
+        },
         main = "property_test.py",
         deps = [
             ":reference",
@@ -98,12 +125,5 @@ py_test(
             "@pypi//pytest",
         ],
     )
-    for kind in [
-        "MUTEX_EVENT",
-        "MUTEX_STATE",
-        "NOT_MUTEX_EVENT",
-        "NOT_MUTEX_STATE",
-        "PARTIAL_VALUE",
-        "PARTIAL_VALUE_BY_TAG",
-    ]
+    for kind, agg, attr_type in PROPERTY_COMBOS
 ]

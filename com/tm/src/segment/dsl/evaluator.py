@@ -29,6 +29,10 @@ from com.tm.src.temporal.ranges import WindowRef
 
 
 class ConditionSource(Protocol):
+    def extended_tag_id(self, tag_string: str) -> int | None:
+        """Tra `tag_dict` (chỉ attribute EXTENDED); chuỗi chưa gặp → None."""
+        ...
+
     def tag_bitmap(self, ref: WindowRef, ds: int, tag_id: int) -> BitMap: ...
 
     def pv_sums(self, ref: WindowRef, ds: int, tag_id: int) -> dict[int, Decimal]: ...
@@ -39,18 +43,19 @@ def evaluate_condition(cond: Condition, catalog: Catalog, sources: Mapping[str, 
     src = sources[attr.name]
     ref = window_ref(cond)
     vr = value_range_of(cond)
-    tag_ids = [attr.tag_id(n) for n in cond.tags]
+    # EXTENDED: tag chưa có trong tag_dict → None → bitmap rỗng (không lỗi, §3.6).
+    tag_ids = [src.extended_tag_id(n) if attr.is_extended else attr.tag_id(n) for n in cond.tags]
 
     match attr.kind:
         case Kind.MUTEX_EVENT | Kind.MUTEX_STATE | Kind.NOT_MUTEX_EVENT | Kind.NOT_MUTEX_STATE:
-            per_tag = [src.tag_bitmap(ref, ds, t) for t in tag_ids]
+            per_tag = [BitMap() if t is None else src.tag_bitmap(ref, ds, t) for t in tag_ids]
         case Kind.PARTIAL_VALUE:
             if vr is not None:  # ad-hoc: SUM toàn attribute (tag 0) ∈ valueRange
                 return users_in_range(src.pv_sums(ref, ds, ANY_TAG), vr)
             per_tag = [src.tag_bitmap(ref, ds, t) for t in tag_ids]
         case Kind.PARTIAL_VALUE_BY_TAG:
             # SUM riêng từng tag, không cộng gộp giữa các tag (§3.2).
-            per_tag = [users_in_range(src.pv_sums(ref, ds, t), vr) for t in tag_ids]
+            per_tag = [BitMap() if t is None else users_in_range(src.pv_sums(ref, ds, t), vr) for t in tag_ids]
 
     if cond.tag_op == TagOp.AND:
         return reduce(lambda a, b: a & b, per_tag)

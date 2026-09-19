@@ -64,6 +64,49 @@ def test_invalid_attributes(a):
         validate_attribute(a)
 
 
+AF = catalog_pb2.AggFunc
+AT = catalog_pb2.AttributeType
+
+
+def attr2(dt, fm=FM.EVENT, agg=AF.AGG_FUNC_UNSPECIFIED, at=AT.ATTRIBUTE_TYPE_UNSPECIFIED):
+    a = attr(900, "x", dt, fm)
+    a.agg_func = agg
+    a.attribute_type = at
+    return a
+
+
+@pytest.mark.parametrize(
+    "a,ok",
+    [
+        (attr2(DT.PARTIAL_VALUE, agg=AF.COUNT), True),
+        (attr2(DT.PARTIAL_VALUE_BY_TAG, agg=AF.MAX), True),
+        (attr2(DT.PARTIAL_VALUE, agg=AF.MIN), True),
+        (attr2(DT.MUTEX, agg=AF.SUM), False),
+        (attr2(DT.NOT_MUTEX, FM.STATE, agg=AF.COUNT), False),
+        (attr2(DT.PARTIAL_VALUE, agg=99), False),
+        (attr2(DT.NOT_MUTEX, at=AT.EXTENDED), True),
+        (attr2(DT.NOT_MUTEX, FM.STATE, at=AT.EXTENDED), True),
+        (attr2(DT.PARTIAL_VALUE_BY_TAG, agg=AF.SUM, at=AT.EXTENDED), True),
+        (attr2(DT.MUTEX, at=AT.EXTENDED), False),
+        (attr2(DT.MUTEX, FM.STATE, at=AT.EXTENDED), False),
+        (attr2(DT.PARTIAL_VALUE, at=AT.EXTENDED), False),
+        (attr2(DT.NOT_MUTEX, at=99), False),
+    ],
+)
+def test_agg_func_and_attribute_type(a, ok):
+    if ok:
+        validate_attribute(a)
+    else:
+        with pytest.raises(CatalogError):
+            validate_attribute(a)
+
+
+def test_extended_has_no_catalog_tags():
+    a = attr2(DT.NOT_MUTEX, at=AT.EXTENDED)
+    with pytest.raises(CatalogError):
+        validate_tag(a, catalog_pb2.Tag(attr_id=900, id=1, name="oa_1"))
+
+
 def vr(from_value=None, to_value=None):
     r = catalog_pb2.ValueRange(from_inclusive=True, to_inclusive=False)
     if from_value is not None:

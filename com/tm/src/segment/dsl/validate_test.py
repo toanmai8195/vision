@@ -11,23 +11,40 @@ import pytest
 
 from com.tm.proto.vision.segment.v1 import segment_pb2
 from com.tm.src.segment.dsl.validate import DslError, validate_condition, validate_rule
-from com.tm.src.temporal.model import AttributeSpec, DateRange, Kind, ValueRange, parse_day
+from com.tm.src.temporal.model import AggFunc, AttributeSpec, AttributeType, DateRange, Kind, ValueRange, parse_day
 
 DS = parse_day("2026-09-15")
 SUPPORTED = frozenset({DateRange.A1, DateRange.A7, DateRange.A30})
 
+# Mọi tổ hợp hợp lệ (kind × aggFunc × attributeType) — P1b thêm 2 chiều cuối.
+AGGS = {Kind.PARTIAL_VALUE: list(AggFunc.values())[1:], Kind.PARTIAL_VALUE_BY_TAG: list(AggFunc.values())[1:]}
+EXTENDED_KINDS = (Kind.NOT_MUTEX_EVENT, Kind.NOT_MUTEX_STATE, Kind.PARTIAL_VALUE_BY_TAG)
+COMBOS = [
+    (k, agg, at)
+    for k in Kind
+    for agg in AGGS.get(k, [AggFunc.AGG_FUNC_UNSPECIFIED])
+    for at in ([AttributeType.STANDARD, AttributeType.EXTENDED] if k in EXTENDED_KINDS else [AttributeType.STANDARD])
+]
+
+
+def attr_name(kind, agg, at):
+    return f"{kind.value}_{AggFunc.Name(agg)}_{AttributeType.Name(at)}".lower()
+
+
 CATALOG = {
-    k.value.lower(): AttributeSpec(
+    attr_name(k, agg, at): AttributeSpec(
         attr_id=i + 1,
-        name=k.value.lower(),
+        name=attr_name(k, agg, at),
         kind=k,
-        tags={"x": 1, "y": 2},
+        tags={} if at == AttributeType.EXTENDED else {"x": 1, "y": 2},
         supported_date_ranges=SUPPORTED,
         value_ranges={1: ValueRange(to_value=Decimal(10)), 2: ValueRange(from_value=Decimal(10))}
         if k is Kind.PARTIAL_VALUE
         else {},
+        agg_func=agg,
+        attribute_type=at,
     )
-    for i, k in enumerate(Kind)
+    for i, (k, agg, at) in enumerate(COMBOS)
 }
 
 # (có tags, tagOp, có valueRange) → hợp lệ?  — theo §3.5 dòng "DSL validate" + §6.1
@@ -100,10 +117,10 @@ WINDOWS = {
 }
 
 MATRIX = [
-    (kind, wname, tags, op, has_vr)
-    for kind in Kind
+    (combo, wname, tags, op, has_vr)
+    for combo in COMBOS
     for wname in WINDOWS
-    for (tags, op, has_vr) in RULES[data_type(kind)]
+    for (tags, op, has_vr) in RULES[data_type(combo[0])]
 ]
 
 
@@ -113,8 +130,8 @@ def test_rules_table_complete():
         assert set(table) == combos, dt
 
 
-def condition(kind: Kind, window: dict, tags, op, has_vr) -> segment_pb2.Condition:
-    c = segment_pb2.Condition(attr=kind.value.lower(), tags=list(tags), **window)
+def condition(name: str, window: dict, tags, op, has_vr) -> segment_pb2.Condition:
+    c = segment_pb2.Condition(attr=name, tags=list(tags), **window)
     if op is not None:
         c.tag_op = segment_pb2.Condition.TagOp.Value(op)
     if has_vr:
@@ -124,33 +141,50 @@ def condition(kind: Kind, window: dict, tags, op, has_vr) -> segment_pb2.Conditi
 
 
 @pytest.mark.parametrize(
-    "kind,wname,tags,op,has_vr",
+    "combo,wname,tags,op,has_vr",
     MATRIX,
-    ids=[f"{k.value}-{w}-{len(t)}tags-{o}-{'vr' if v else 'novr'}" for k, w, t, o, v in MATRIX],
+    ids=[f"{attr_name(*c)}-{w}-{len(t)}tags-{o}-{'vr' if v else 'novr'}" for c, w, t, o, v in MATRIX],
 )
-def test_matrix(kind, wname, tags, op, has_vr):
+def test_matrix(combo, wname, tags, op, has_vr):
     window, window_ok = WINDOWS[wname]
-    ok = window_ok and RULES[data_type(kind)][(tags, op, has_vr)]
-    c = condition(kind, window, tags, op, has_vr)
+    ok = window_ok and RULES[data_type(combo[0])][(tags, op, has_vr)]
+    name = attr_name(*combo)
+    c = condition(name, window, tags, op, has_vr)
     if ok:
-        assert validate_condition(c, CATALOG, DS) is CATALOG[kind.value.lower()]
+        assert validate_condition(c, CATALOG, DS) is CATALOG[name]
     else:
         with pytest.raises(DslError):
             validate_condition(c, CATALOG, DS)
+
+
+def test_combos_cover_p1b():
+    assert {agg for k, agg, _ in COMBOS if k is Kind.PARTIAL_VALUE} == {AggFunc.SUM, AggFunc.COUNT, AggFunc.MIN, AggFunc.MAX}
+    assert {k for k, _, at in COMBOS if at == AttributeType.EXTENDED} == set(EXTENDED_KINDS)
+
+
+@pytest.mark.parametrize("kind", EXTENDED_KINDS, ids=lambda k: k.value)
+def test_extended_tag_is_free_string(kind):
+    agg = AggFunc.SUM if kind is Kind.PARTIAL_VALUE_BY_TAG else AggFunc.AGG_FUNC_UNSPECIFIED
+    vr = kind is Kind.PARTIAL_VALUE_BY_TAG
+    ext = condition(attr_name(kind, agg, AttributeType.EXTENDED), dict(date_range=DateRange.A7), ["oa_123", "gift.x"], None, vr)
+    validate_condition(ext, CATALOG, DS)  # không kiểm catalog
+    std = condition(attr_name(kind, agg, AttributeType.STANDARD), dict(date_range=DateRange.A7), ["oa_123"], None, vr)
+    with pytest.raises(DslError):
+        validate_condition(std, CATALOG, DS)  # STANDARD: tag lạ → lỗi
 
 
 @pytest.mark.parametrize(
     "cond",
     [
         segment_pb2.Condition(attr="unknown", tags=["x"], date_range=DateRange.A7),
-        segment_pb2.Condition(attr="not_mutex_event", tags=["z"], date_range=DateRange.A7),  # tag lạ
-        segment_pb2.Condition(attr="not_mutex_event", tags=["x", "x"], date_range=DateRange.A7),
-        segment_pb2.Condition(attr="partial_value", date_range=DateRange.A7, value_range={}),  # range rỗng
+        segment_pb2.Condition(attr="not_mutex_event_agg_func_unspecified_standard", tags=["z"], date_range=DateRange.A7),  # tag lạ
+        segment_pb2.Condition(attr="not_mutex_event_agg_func_unspecified_standard", tags=["x", "x"], date_range=DateRange.A7),
+        segment_pb2.Condition(attr="partial_value_sum_standard", date_range=DateRange.A7, value_range={}),  # range rỗng
         segment_pb2.Condition(
-            attr="partial_value", date_range=DateRange.A7, value_range={"from_value": "abc"}
+            attr="partial_value_sum_standard", date_range=DateRange.A7, value_range={"from_value": "abc"}
         ),
         segment_pb2.Condition(
-            attr="partial_value", date_range=DateRange.A7, value_range={"from_value": "5", "to_value": "1"}
+            attr="partial_value_sum_standard", date_range=DateRange.A7, value_range={"from_value": "5", "to_value": "1"}
         ),
     ],
 )
@@ -160,7 +194,7 @@ def test_invalid_conditions(cond):
 
 
 def leaf(**kw):
-    return segment_pb2.Rule(condition=segment_pb2.Condition(attr="not_mutex_event", tags=["x"], date_range=DateRange.A7, **kw))
+    return segment_pb2.Rule(condition=segment_pb2.Condition(attr="not_mutex_event_agg_func_unspecified_standard", tags=["x"], date_range=DateRange.A7, **kw))
 
 
 def test_rule_tree():
@@ -177,7 +211,7 @@ def test_rule_tree():
             children=[
                 segment_pb2.Rule(
                     operator=ops.OR,
-                    children=[segment_pb2.Rule(condition=segment_pb2.Condition(attr="not_mutex_event", date_range=DateRange.A7))],
+                    children=[segment_pb2.Rule(condition=segment_pb2.Condition(attr="not_mutex_event_agg_func_unspecified_standard", date_range=DateRange.A7))],
                 )
             ],
         ),

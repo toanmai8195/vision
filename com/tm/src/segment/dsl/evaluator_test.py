@@ -9,7 +9,7 @@ from pyroaring import BitMap
 from com.tm.proto.vision.segment.v1 import segment_pb2
 from com.tm.src.segment.dsl.evaluator import evaluate, evaluate_condition
 from com.tm.src.segment.dsl.validate import DslError
-from com.tm.src.temporal.model import ANY_TAG, AttributeSpec, DateRange, Kind, ValueRange, parse_day
+from com.tm.src.temporal.model import ANY_TAG, AttributeSpec, AttributeType, DateRange, Kind, TagDict, ValueRange, parse_day
 from com.tm.src.temporal.ranges import CustomRange
 
 DS = parse_day("2026-09-15")
@@ -21,10 +21,14 @@ TagOp = segment_pb2.Condition.TagOp
 class FakeSource:
     """Bitmap/SUM cố định theo (window, tag); ghi lại số lần gọi để kiểm cache."""
 
-    def __init__(self, bitmaps=None, sums=None):
+    def __init__(self, bitmaps=None, sums=None, tag_dict=None):
         self.bitmaps = bitmaps or {}
         self.sums = sums or {}
+        self.tag_dict = tag_dict
         self.calls = 0
+
+    def extended_tag_id(self, tag_string):
+        return self.tag_dict.lookup(tag_string)
 
     def tag_bitmap(self, ref, ds, tag_id):
         self.calls += 1
@@ -135,6 +139,28 @@ def test_result_is_a_copy():
     out = evaluate(leaf(cond("mutex_event", ["a"])), CATALOG, {"mutex_event": src}, DS)
     out.add(99)
     assert evaluate(leaf(cond("mutex_event", ["a"])), CATALOG, {"mutex_event": src}, DS) == BitMap([1])
+
+
+
+def test_extended_tags_resolved_via_tag_dict():
+    d = TagDict()
+    oa1, oa2 = d.encode("oa_1"), d.encode("oa_2")
+    catalog = {
+        "oa": AttributeSpec(9, "oa", Kind.NOT_MUTEX_EVENT, {}, RANGES, attribute_type=AttributeType.EXTENDED),
+        "gift": AttributeSpec(10, "gift", Kind.PARTIAL_VALUE_BY_TAG, {}, RANGES, attribute_type=AttributeType.EXTENDED),
+    }
+    sources = {
+        "oa": FakeSource(bitmaps={(A7, oa1): [1, 2], (A7, oa2): [2]}, tag_dict=d),
+        "gift": FakeSource(sums={(A7, oa1): {1: 500}}, tag_dict=d),
+    }
+    assert evaluate_condition(cond("oa", ["oa_1"]), catalog, sources, DS) == BitMap([1, 2])
+    assert evaluate_condition(cond("oa", ["oa_1", "oa_2"], "AND"), catalog, sources, DS) == BitMap([2])
+    # chuỗi chưa có trong tag_dict → rỗng, không lỗi; OR vẫn giữ phần còn lại, AND thành rỗng
+    assert evaluate_condition(cond("oa", ["oa_unknown"]), catalog, sources, DS) == BitMap()
+    assert evaluate_condition(cond("oa", ["oa_1", "oa_unknown"], "OR"), catalog, sources, DS) == BitMap([1, 2])
+    assert evaluate_condition(cond("oa", ["oa_1", "oa_unknown"], "AND"), catalog, sources, DS) == BitMap()
+    assert evaluate_condition(cond("gift", ["oa_1"], vr=GTE_500), catalog, sources, DS) == BitMap([1])
+    assert evaluate_condition(cond("gift", ["nope"], vr=GTE_500), catalog, sources, DS) == BitMap()
 
 
 if __name__ == "__main__":

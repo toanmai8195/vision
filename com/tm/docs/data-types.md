@@ -122,6 +122,68 @@ Mỗi con số kèm một tag; hệ thống **cộng riêng từng tag**. Condit
 
 ---
 
+## 5. `aggFunc` — cách gom con số (PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG)
+
+Mặc định cộng dồn (`SUM`). Attribute có thể chọn một hàm khác, miễn là ghép được qua các đoạn ngày (§3.2.1 `CLAUDE.md`).
+
+**User Chi** (như §3):
+```
+01/09  1.500.000
+10/09    300.000
+15/09    200.000
+15/09    100.000
+```
+
+| aggFunc | A1 | A7 | A30 | Custom 01→09 | Condition ví dụ |
+|---|---|---|---|---|---|
+| `SUM` | 300K | 600K | 2.1M | 1.5M | tổng A7 ≥ 500K ✅ |
+| `COUNT` | 2 | 3 | 4 | 1 | số giao dịch A7 ≥ 3 ✅; A1 ≥ 3 ❌ |
+| `MIN` | 100K | 100K | 100K | 1.5M | giao dịch nhỏ nhất A7 < 150K ✅ |
+| `MAX` | 200K | 300K | 1.5M | 1.5M | giao dịch lớn nhất A30 ≥ 1M ✅; A7 ≥ 1M ❌ |
+
+- Mỗi attribute **một** hàm. Muốn cả "tổng" và "số lần" → 2 attribute (`txn_amount` SUM, `txn_count` COUNT).
+- Với BY_TAG: gom **riêng từng tag**. Chi theo ngành hàng, `COUNT`: fnb A7 = 2 → "fnb A7 ≥ 2 lần" ✅, bill A7 = 1 → ❌.
+- Không có event → không thuộc range nào, với mọi hàm.
+- Chưa hỗ trợ: `AVG` (dùng 2 attribute SUM + COUNT), `DISTINCT_COUNT`, `FIRST`/`LAST`.
+
+## 6. `EXTENDED` — tag là chuỗi tự do, số lượng rất lớn
+
+Tag bình thường (`STANDARD`) được khai báo trước trong catalog: city = {hcm, hn}. Có những attribute mà tag **sinh ra liên tục** và không thể khai báo trước: mã Official Account, mã quà, mã campaign. Khi đó attribute là `EXTENDED`:
+- Nguồn gửi chuỗi bất kỳ (`oa_12345`); hệ thống tự cấp số (`tag_id`) qua dictionary, không cần khai báo.
+- Chỉ tính kết quả theo khoảng ngày cho những tag **đang được segment dùng**. Tag không ai dùng → không tốn chi phí.
+- Hỗ trợ cho `NOT_MUTEX` (EVENT / STATE) và `PARTIAL_VALUE_BY_TAG`. `MUTEX` và `PARTIAL_VALUE` không hỗ trợ.
+
+**Follow OA** (`oa_follow`, NOT_MUTEX EVENT, EXTENDED):
+```
+02/09  User 1  follow   oa_12345
+10/09  User 2  follow   oa_12345, oa_777
+13/09  User 1  unfollow oa_12345
+14/09  User 3  follow   oa_999
+```
+Segment đang dùng: `oa_12345` với A7, A30; `oa_777` với A30.
+
+| Condition | Tính thế nào | Kết quả |
+|---|---|---|
+| oa_12345, A7 | đã tính sẵn | {2} (User 1 unfollow 13/09) |
+| oa_12345 AND oa_777, A30 | đã tính sẵn | {2} |
+| oa_999, A7 | **chưa tính sẵn** → tính ngay (on-demand), ghi nhận để từ hôm sau tính sẵn | {3} |
+| oa_never_seen, A7 | chuỗi chưa từng xuất hiện | {} (không lỗi) |
+
+**Giá trị quà** (`gift_value`, PARTIAL_VALUE_BY_TAG SUM, EXTENDED):
+```
+10/09  User 1  gift_abc   50.000
+14/09  User 1  gift_abc   70.000
+15/09  User 2  gift_abc   30.000
+15/09  User 2  gift_xyz  200.000
+```
+| Condition | Kết quả |
+|---|---|
+| gift_abc, A7, ≥ 100K | {1} (120K) |
+| gift_xyz, A7, ≥ 100K | {2} |
+| gift_abc OR gift_xyz, A7, ≥ 100K | {1, 2} |
+
+---
+
 ## Tóm tắt
 
 | | MUTEX | NOT_MUTEX | PARTIAL_VALUE | PARTIAL_VALUE_BY_TAG |
@@ -131,10 +193,14 @@ Mỗi con số kèm một tag; hệ thống **cộng riêng từng tag**. Condit
 | Số tag / user | ≤ 1 | nhiều | ≤ 1 nếu range không chồng nhau | mỗi tag một tổng riêng |
 | Ngưỡng | — | — | tag định sẵn hoặc ad-hoc | luôn ad-hoc trong condition |
 | Ví dụ | city, churn band, age band | sản phẩm đang dùng, loại giao dịch | tổng chi tiêu | chi theo ngành hàng |
-| Lưu trữ | bitmap | bitmap | row `(uidx, sum)` | row `(tag, uidx, sum)` |
+| Lưu trữ | bitmap | bitmap | row `(uidx, agg)` | row `(tag, uidx, agg)` |
+| `aggFunc` | — | — | SUM · COUNT · MIN · MAX | SUM · COUNT · MIN · MAX |
+| Tag EXTENDED | ❌ | ✅ | ❌ | ✅ |
 
 ## Chọn loại khi tạo attribute mới
 
 1. Dữ liệu là **con số cần cộng dồn**? → `PARTIAL_VALUE` (cần tách theo nhóm → `PARTIAL_VALUE_BY_TAG`).
 2. Là nhãn: **một người có thể có 2 giá trị cùng lúc?** Không → `MUTEX` · Có → `NOT_MUTEX`.
 3. Nhãn là **trạng thái đang có** hay **sự kiện đã xảy ra**? → `STATE` / `EVENT`.
+4. Con số: cần **tổng, số lần, nhỏ nhất hay lớn nhất**? → `aggFunc`. Là **trạng thái** (số dư, hạn mức)? → không dùng PARTIAL_VALUE, dùng MUTEX `STATE` với bucket.
+5. Tag có **khai báo trước được** không (vài chục – vài nghìn giá trị cố định)? Có → `STANDARD`. Sinh liên tục / không giới hạn (mã OA, mã quà) → `EXTENDED`.

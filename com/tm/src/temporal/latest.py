@@ -3,8 +3,8 @@
 | Loại | Cập nhật mỗi ngày |
 |---|---|
 | MUTEX EVENT | `LATEST(d,t) = (ADD(d,t) − DEL(d,t)) ∪ (LATEST(d−1,t) − ADD(d,0) − DEL(d,t))` |
-| NOT_MUTEX EVENT | `POS(d,t) = ADD(d,t) ∪ (POS(d−1,t) − DEL(d,t))` |
-| STATE | `STATE(d,t) = (STATE(d−1,t) − REMOVED(d,t)) ∪ ADDED(d,t)` |
+| NOT_MUTEX EVENT | `POS(d,t) = ADD(d,t) ∪ (POS(d−1,t) − DEL(d,t))` — chỉ tag có signal |
+| STATE | `STATE(d,t) = (STATE(d−1,t) − REMOVED(d,t)) ∪ ADDED(d,t)` — chỉ tag có delta |
 
 Lưu: 7 ngày gần nhất + checkpoint Chủ nhật. `state_at(r)` với `r` cũ = checkpoint tuần gần nhất + forward-fold ≤ 6 ngày.
 """
@@ -47,26 +47,35 @@ def fold_mutex(prev: Mapping[int, BitMap], daily: LabelDaily) -> TagSets:
     return out
 
 
-def fold_not_mutex(prev: Mapping[int, BitMap], daily: LabelDaily) -> TagSets:
-    if daily.is_empty():
-        return dict(prev)
-    out: TagSets = {}
-    for t in prev.keys() | daily.add.keys() | daily.dele.keys():
-        bm = daily.add.get(t, EMPTY) | (prev.get(t, EMPTY) - daily.dele.get(t, EMPTY))
+def _update_touched(prev: Mapping[int, BitMap], touched: set[int], new: Callable[[int], BitMap]) -> TagSets:
+    """Chỉ tính lại tag có thay đổi trong ngày, tag khác giữ nguyên (chia sẻ bitmap, không sửa tại chỗ).
+
+    Chi phí/ngày tỉ lệ số tag có signal — điều kiện để hỗ trợ tag EXTENDED (CLAUDE.md §3.6).
+    """
+    out: TagSets = dict(prev)
+    for t in touched:
+        bm = new(t)
         if bm:
             out[t] = bm
+        else:
+            out.pop(t, None)
     return out
+
+
+def fold_not_mutex(prev: Mapping[int, BitMap], daily: LabelDaily) -> TagSets:
+    return _update_touched(
+        prev,
+        daily.add.keys() | daily.dele.keys(),
+        lambda t: daily.add.get(t, EMPTY) | (prev.get(t, EMPTY) - daily.dele.get(t, EMPTY)),
+    )
 
 
 def fold_state(prev: Mapping[int, BitMap], daily: StateDaily) -> TagSets:
-    if daily.is_empty():
-        return dict(prev)
-    out: TagSets = {}
-    for t in prev.keys() | daily.added.keys() | daily.removed.keys():
-        bm = (prev.get(t, EMPTY) - daily.removed.get(t, EMPTY)) | daily.added.get(t, EMPTY)
-        if bm:
-            out[t] = bm
-    return out
+    return _update_touched(
+        prev,
+        daily.added.keys() | daily.removed.keys(),
+        lambda t: (prev.get(t, EMPTY) - daily.removed.get(t, EMPTY)) | daily.added.get(t, EMPTY),
+    )
 
 
 def fold_for(kind: Kind) -> Callable:

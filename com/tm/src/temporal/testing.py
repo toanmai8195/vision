@@ -21,11 +21,15 @@ from com.tm.proto.vision.segment.v1 import segment_pb2
 from com.tm.src.temporal.engine import AttributeEngine, Silver
 from com.tm.src.temporal.model import (
     ANY_TAG,
+    AggFunc,
     AttributeSpec,
+    AttributeType,
     DataType,
     DateRange,
     FeedMode,
+    ModelError,
     StateInterval,
+    TagDict,
     TagEvent,
     ValueEvent,
     ValueRange,
@@ -49,13 +53,22 @@ def run_pipeline(
     feed: Feed,
     universe_of: Callable[[int], BitMap],
     ranges_from: int | None = None,
+    tag_dict: TagDict | None = None,
+    initial_usage: Mapping[int, Iterable[int]] | None = None,
 ) -> AttributeEngine:
-    """Chạy plan từng ngày. `ranges_from`: bỏ bước range/DQ trước ngày này (tăng tốc property test)."""
+    """Chạy plan từng ngày. `ranges_from`: bỏ bước range/DQ trước ngày này (tăng tốc property test).
+
+    EXTENDED: `tag_dict` bắt buộc; `initial_usage` ~ `meta.condition_usage` ban đầu. Query on-demand trong lúc
+    chạy ghi thêm vào `engine.usage`, ngày sau planner precompute các tag đó.
+    """
     silver = Silver(attr.kind)
-    engine = AttributeEngine(attr, silver, history_start=history_start, universe_of=universe_of)
+    engine = AttributeEngine(attr, silver, history_start=history_start, universe_of=universe_of, tag_dict=tag_dict)
+    for dr, tags in (initial_usage or {}).items():
+        engine.usage[dr].update(tags)
     for day in range(history_start, ds + 1):
         reprocess_from = feed(day, silver)
-        steps = plan(day, attr, history_start=history_start, reprocess_from=reprocess_from)
+        usage = engine.usage_snapshot() if attr.is_extended else None
+        steps = plan(day, attr, history_start=history_start, reprocess_from=reprocess_from, usage=usage)
         if ranges_from is not None and day < ranges_from:
             steps = [s for s in steps if not isinstance(s, (RangeStep, DqStep))]
         engine.run(steps)
@@ -106,14 +119,25 @@ class GoldenCase:
     value_events: list[tuple[int, ValueEvent]] = field(default_factory=list)
     intervals: list[StateInterval] = field(default_factory=list)
     expected: dict[str, Any] = field(default_factory=dict)
+    tag_dict: TagDict | None = None
+    usage: dict[int, set[int]] = field(default_factory=dict)
+
+    def encode(self, name: str) -> int:
+        """Tag trong input: STANDARD tra catalog; EXTENDED cấp id qua tag_dict (như L2)."""
+        if name == "__any__":
+            return ANY_TAG
+        return self.tag_dict.encode(name) if self.tag_dict is not None else self.attr.tag_id(name)
 
     def tag(self, name: str) -> int:
-        return ANY_TAG if name == "__any__" else self.attr.tag_id(name)
-
-    def tag_name(self, tag_id: int) -> str:
-        if tag_id == ANY_TAG:
-            return "__any__"
-        return next(n for n, t in self.attr.tags.items() if t == tag_id)
+        """Tag trong kỳ vọng: phải đã xuất hiện trong input."""
+        if name == "__any__":
+            return ANY_TAG
+        if self.tag_dict is None:
+            return self.attr.tag_id(name)
+        tag_id = self.tag_dict.lookup(name)
+        if tag_id is None:
+            raise ModelError(f"{self.name}: EXTENDED tag {name!r} not in input")
+        return tag_id
 
     def run(self) -> AttributeEngine:
         if self.attr.kind.is_state:
@@ -121,7 +145,13 @@ class GoldenCase:
         else:
             feed = arrival_feed(self.tag_events, self.value_events)
         return run_pipeline(
-            self.attr, history_start=self.history_start, ds=self.ds, feed=feed, universe_of=lambda _ds: self.universe
+            self.attr,
+            history_start=self.history_start,
+            ds=self.ds,
+            feed=feed,
+            universe_of=lambda _ds: self.universe,
+            tag_dict=self.tag_dict,
+            initial_usage=self.usage if self.attr.is_extended else None,
         )
 
 
@@ -146,7 +176,7 @@ def _parse_case(raw: Mapping[str, Any]) -> GoldenCase:
     kind = kind_of(DataType.Value(a["data_type"]), FeedMode.Value(a.get("feed_mode", "EVENT")))
     tags: dict[str, int] = {}
     value_ranges: dict[int, ValueRange] = {}
-    for name, spec in a["tags"].items():
+    for name, spec in a.get("tags", {}).items():
         if isinstance(spec, int):
             tags[name] = spec
         else:
@@ -159,6 +189,8 @@ def _parse_case(raw: Mapping[str, Any]) -> GoldenCase:
         tags=tags,
         supported_date_ranges=frozenset(DateRange.Value(x) for x in a["supported_date_ranges"]),
         value_ranges=value_ranges,
+        agg_func=AggFunc.Value(a["agg_func"]) if "agg_func" in a else AggFunc.AGG_FUNC_UNSPECIFIED,
+        attribute_type=AttributeType.Value(a.get("attribute_type", "STANDARD")),
     )
     case = GoldenCase(
         name=raw["name"],
@@ -167,14 +199,15 @@ def _parse_case(raw: Mapping[str, Any]) -> GoldenCase:
         history_start=parse_day(str(raw["history_start"])),
         universe=BitMap(raw.get("universe", [])),
         expected=raw.get("expected", {}),
+        tag_dict=TagDict() if attr.is_extended else None,
     )
     for i, e in enumerate(raw.get("tag_events", [])):
         ev = TagEvent(
             event_id=e.get("event_id", f"{case.name}-{i:04d}"),
             uidx=e["uidx"],
             ts_ms=_ts(e),
-            tags_add=frozenset(case.tag(t) for t in e.get("add", [])),
-            tags_remove=frozenset(case.tag(t) for t in e.get("remove", [])),
+            tags_add=frozenset(case.encode(t) for t in e.get("add", [])),
+            tags_remove=frozenset(case.encode(t) for t in e.get("remove", [])),
         )
         case.tag_events.append((parse_day(str(e["arrival"])) if "arrival" in e else ev.ds, ev))
     for i, e in enumerate(raw.get("value_events", [])):
@@ -182,7 +215,7 @@ def _parse_case(raw: Mapping[str, Any]) -> GoldenCase:
             event_id=e.get("event_id", f"{case.name}-{i:04d}"),
             uidx=e["uidx"],
             ts_ms=_ts(e),
-            tag=case.tag(e["tag"]) if "tag" in e else ANY_TAG,
+            tag=case.encode(e["tag"]) if "tag" in e else ANY_TAG,
             value=parse_decimal(str(e["value"])),
         )
         case.value_events.append((parse_day(str(e["arrival"])) if "arrival" in e else ev.ds, ev))
@@ -190,11 +223,13 @@ def _parse_case(raw: Mapping[str, Any]) -> GoldenCase:
         case.intervals.append(
             StateInterval(
                 uidx=e["uidx"],
-                tag=case.tag(e["tag"]),
+                tag=case.encode(e["tag"]),
                 valid_from=parse_day(str(e["from"])),
                 valid_to=parse_day(str(e["to"])) if e.get("to") else None,
             )
         )
+    for dr_name, tags in raw.get("usage", {}).items():
+        case.usage[DateRange.Value(dr_name)] = {case.tag(t) for t in tags}
     return case
 
 

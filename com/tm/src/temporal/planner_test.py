@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from com.tm.src.temporal.model import AttributeSpec, DateRange, Kind, ValueRange, parse_day
+from com.tm.src.temporal.model import AttributeSpec, AttributeType, DateRange, Kind, ValueRange, parse_day
 from com.tm.src.temporal.planner import (
     BlockSource,
     BlockStep,
@@ -147,6 +147,29 @@ def test_plan_backfill():
     steps = plan_backfill(DS - 9, DS, a, history_start=START)
     assert [s.day for s in steps if isinstance(s, DailyStep)] == list(range(DS - 9, DS + 1))
     assert steps == [s for d in range(DS - 9, DS + 1) for s in plan(d, a, history_start=START)]
+
+
+
+@pytest.mark.parametrize("kind", [Kind.NOT_MUTEX_EVENT, Kind.NOT_MUTEX_STATE, Kind.PARTIAL_VALUE_BY_TAG], ids=lambda k: k.value)
+def test_extended_ranges_are_usage_driven(kind):
+    ext = AttributeSpec(1, "ext", kind, {}, RANGES, attribute_type=AttributeType.EXTENDED)
+    usage = {DateRange.A7: frozenset({5, 2}), DateRange.A30: frozenset()}
+    steps = plan(DS, ext, history_start=START, usage=usage)
+    scopes = {s.date_range: s.tags for s in steps if isinstance(s, RangeStep)}
+    assert scopes[DateRange.A7] == (2, 5)
+    assert scopes[DateRange.A30] == ()
+    assert scopes[DateRange.A1] == ()  # không ai dùng → không materialize
+    assert DqCheck.TAG_DICT_APPEND_ONLY in {s.check for s in steps if isinstance(s, DqStep)}
+    with pytest.raises(PlanError):
+        plan(DS, ext, history_start=START)  # EXTENDED bắt buộc có usage
+
+
+def test_standard_rejects_usage():
+    with pytest.raises(PlanError):
+        plan(DS, attr(Kind.NOT_MUTEX_EVENT), history_start=START, usage={})
+    steps = plan(DS, attr(Kind.NOT_MUTEX_EVENT), history_start=START)
+    assert all(s.tags is None for s in steps if isinstance(s, RangeStep))
+    assert DqCheck.TAG_DICT_APPEND_ONLY not in {s.check for s in steps if isinstance(s, DqStep)}
 
 
 if __name__ == "__main__":

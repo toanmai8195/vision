@@ -4,6 +4,9 @@ Thứ tự: daily → block → LATEST/POS/STATE → checkpoint (Chủ nhật) �
 P1 chỉ sinh bước (chưa sinh SQL); `engine.AttributeEngine` chạy các bước này trong bộ nhớ, nên property test
 kiểm luôn cả planner. P4 sinh SQL StarRocks cho cùng các bước.
 
+EXTENDED (§3.6): range usage-driven — `usage` (~ `meta.condition_usage`) cho biết tag nào được segment dùng
+với date range nào; RangeStep chỉ materialize các tag đó. Tag khác tính on-demand khi segment cần.
+
 Late data (≤ 3 ngày): `reprocess_from = d` → làm lại daily `d..ds`, build lại mọi block chứa các ngày đó,
 fold lại LATEST/STATE từ `d` tới `ds`. Cũ hơn 3 ngày → `plan_backfill`.
 """
@@ -11,6 +14,7 @@ fold lại LATEST/STATE từ `d` tới `ds`. Cũ hơn 3 ngày → `plan_backfill
 from __future__ import annotations
 
 import enum
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from com.tm.src.temporal.blocks import Block, blocks_closed_by
@@ -58,9 +62,10 @@ class DqCheck(enum.Enum):
     MUTEX_WINDOW_DISJOINT = "tag rời nhau trong mỗi window"
     WINDOW_MONOTONIC = "cnt(A7) ≤ cnt(A30) ≤ … ≤ cnt(ALWAYS_ACTIVE)"
     STATE_CONSISTENCY = "STATE(d) == (STATE(d−1) − REMOVED) ∪ ADDED"
-    PV_TOTAL = "Σ pv_daily(d) == Σ silver(d)"
-    PV_TOTAL_BY_TAG = "Σ pv_daily(d, tag) == Σ silver(d, tag)"
+    PV_TOTAL = "AGG pv_daily(d) == AGG silver(d)"
+    PV_TOTAL_BY_TAG = "AGG pv_daily(d, tag) == AGG silver(d, tag)"
     UIDX_IN_UNIVERSE = "uidx ⊆ UNIVERSE(ds)"
+    TAG_DICT_APPEND_ONLY = "tag_dict append-only (EXTENDED)"
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,8 @@ class RangeStep:
     ds: int
     date_range: int
     mode: RangeMode
+    tags: tuple[int, ...] | None = None
+    """None = mọi tag (STANDARD). EXTENDED: chỉ các tag trong `usage` của date range này."""
 
 
 @dataclass(frozen=True)
@@ -154,13 +161,29 @@ def _range_order(dr: int) -> tuple[int, int]:
     return (0, LAST_N[dr]) if dr in LAST_N else (1, ALL_DATE_RANGES.index(dr))
 
 
-def plan(ds: int, attr: AttributeSpec, *, history_start: int, reprocess_from: int | None = None) -> list[Step]:
+Usage = Mapping[int, frozenset[int]]
+"""DateRange → tập tag_id được segment dùng (~ `meta.condition_usage`)."""
+
+
+def plan(
+    ds: int,
+    attr: AttributeSpec,
+    *,
+    history_start: int,
+    reprocess_from: int | None = None,
+    usage: Usage | None = None,
+) -> list[Step]:
     """Các bước cho ngày `ds` của một attribute.
 
     - `history_start`: ngày đầu lịch sử của attribute; ngày đó STATE nạp snapshot thay vì delta.
     - `reprocess_from = d` (`ds − 3 ≤ d < ds`): silver của các ngày `d..ds−1` đổi (late data).
+    - `usage`: bắt buộc với EXTENDED (có thể rỗng), cấm với STANDARD.
     """
     p = _profile(attr.kind)
+    if attr.is_extended and usage is None:
+        raise PlanError(f"{attr.name}: EXTENDED attribute needs usage (meta.condition_usage)")
+    if not attr.is_extended and usage is not None:
+        raise PlanError(f"{attr.name}: usage is only for EXTENDED attributes")
     if ds < history_start:
         raise PlanError(f"ds {to_date(ds)} < history_start {to_date(history_start)}")
     first = ds if reprocess_from is None else max(reprocess_from, history_start)
@@ -197,14 +220,18 @@ def plan(ds: int, attr: AttributeSpec, *, history_start: int, reprocess_from: in
             # Đóng băng từ ngày 1; chỉ tính lại khi late data rơi vào tháng trước.
             if first > window_of(DateRange.LAST_MONTH, ds).r:
                 mode = RangeMode.CARRY_FORWARD
-        steps.append(RangeStep(ds, dr, mode))
+        tags = tuple(sorted(usage.get(dr, ()))) if usage is not None else None
+        steps.append(RangeStep(ds, dr, mode, tags))
 
-    for check in (*p.dq, DqCheck.UIDX_IN_UNIVERSE):
+    extra = (DqCheck.TAG_DICT_APPEND_ONLY,) if attr.is_extended else ()
+    for check in (*p.dq, *extra, DqCheck.UIDX_IN_UNIVERSE):
         steps.append(DqStep(ds, check, days))
     return steps
 
 
-def plan_backfill(from_day: int, to_day: int, attr: AttributeSpec, *, history_start: int) -> list[Step]:
+def plan_backfill(
+    from_day: int, to_day: int, attr: AttributeSpec, *, history_start: int, usage: Usage | None = None
+) -> list[Step]:
     """Chạy tuần tự từng ngày (CLAUDE.md §7 `vision_backfill`).
 
     `to_day` phải là `ds` mới nhất đã chạy: LATEST/STATE của mọi ngày sau `from_day` phải được fold lại.
@@ -213,5 +240,5 @@ def plan_backfill(from_day: int, to_day: int, attr: AttributeSpec, *, history_st
         raise PlanError("from_day > to_day")
     steps: list[Step] = []
     for d in range(from_day, to_day + 1):
-        steps.extend(plan(d, attr, history_start=history_start))
+        steps.extend(plan(d, attr, history_start=history_start, usage=usage))
     return steps

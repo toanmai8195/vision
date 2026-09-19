@@ -1,5 +1,8 @@
 """Mô hình dữ liệu thuần + reduce trong ngày (L3) — CLAUDE.md §3, §4.1.
 
+Chiều cấu hình ngoài (dataType, feedMode): `aggFunc` của PARTIAL_VALUE(_BY_TAG) (§3.2.1) và
+`attributeType` STANDARD / EXTENDED (§3.6).
+
 - Ngày = `e(ds)`: số ngày từ 1970-01-01 (int). `ds` suy ra từ `event_ts` theo Asia/Ho_Chi_Minh.
 - Tập user = `pyroaring.BitMap` chứa `uidx`.
 - Tag = `tag_id` (int ≥ 1); `tag_id = 0` là pseudo-tag `__any__` (ADD(d,0) của MUTEX, tag của PARTIAL_VALUE).
@@ -10,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import enum
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
@@ -21,6 +24,8 @@ from com.tm.proto.vision.catalog.v1 import catalog_pb2
 DataType = catalog_pb2.DataType
 FeedMode = catalog_pb2.FeedMode
 DateRange = catalog_pb2.DateRange
+AggFunc = catalog_pb2.AggFunc
+AttributeType = catalog_pb2.AttributeType
 
 ANY_TAG = 0
 EPOCH = dt.date(1970, 1, 1)
@@ -188,8 +193,33 @@ class AttributeSpec:
     supported_date_ranges: frozenset[int]
     value_ranges: Mapping[int, ValueRange] = field(default_factory=dict)
     """Chỉ PARTIAL_VALUE: tag_id → bucket định sẵn."""
+    agg_func: int = AggFunc.AGG_FUNC_UNSPECIFIED
+    """Chỉ PARTIAL_VALUE(_BY_TAG); UNSPECIFIED được chuẩn hoá thành SUM."""
+    attribute_type: int = AttributeType.STANDARD
+    """STANDARD: tag trong catalog (`tags`). EXTENDED: tag là chuỗi tự do qua `TagDict`, `tags` rỗng."""
 
     def __post_init__(self) -> None:
+        # aggFunc (§3.2.1)
+        if self.kind in VALUE_KINDS:
+            if self.agg_func == AggFunc.AGG_FUNC_UNSPECIFIED:
+                object.__setattr__(self, "agg_func", AggFunc.SUM)
+            aggregator(self.agg_func)  # lỗi tường minh nếu không hỗ trợ
+        elif self.agg_func != AggFunc.AGG_FUNC_UNSPECIFIED:
+            raise ModelError(f"{self.name}: agg_func is only allowed for PARTIAL_VALUE(_BY_TAG)")
+        # attributeType (§3.6)
+        if self.attribute_type == AttributeType.ATTRIBUTE_TYPE_UNSPECIFIED:
+            object.__setattr__(self, "attribute_type", AttributeType.STANDARD)
+        match (self.attribute_type, self.kind):
+            case (AttributeType.STANDARD, _):
+                pass
+            case (AttributeType.EXTENDED, Kind.NOT_MUTEX_EVENT | Kind.NOT_MUTEX_STATE | Kind.PARTIAL_VALUE_BY_TAG):
+                if self.tags:
+                    raise ModelError(f"{self.name}: EXTENDED attribute has no catalog tags")
+            case (AttributeType.EXTENDED, Kind.MUTEX_EVENT | Kind.MUTEX_STATE | Kind.PARTIAL_VALUE):
+                # TODO(verify): MUTEX EXTENDED cần "tag mới nhất" dạng cột theo user (CLAUDE.md §3.5).
+                raise ModelError(f"{self.name}: EXTENDED is not supported for {self.kind.value}")
+            case _:
+                raise ModelError(f"{self.name}: unsupported attribute_type {self.attribute_type}")
         if any(t < 1 for t in self.tags.values()):
             raise ModelError(f"{self.name}: tag_id must be >= 1")
         if not self.supported_date_ranges or DateRange.DATE_RANGE_UNSPECIFIED in self.supported_date_ranges:
@@ -209,10 +239,17 @@ class AttributeSpec:
                     raise ModelError(f"{self.name}: value_range is only allowed for PARTIAL_VALUE tags")
 
     @property
+    def is_extended(self) -> bool:
+        return self.attribute_type == AttributeType.EXTENDED
+
+    @property
     def tag_ids(self) -> list[int]:
         return sorted(self.tags.values())
 
     def tag_id(self, name: str) -> int:
+        """Tag STANDARD. Tag EXTENDED phải tra qua `TagDict`."""
+        if self.is_extended:
+            raise ModelError(f"{self.name}: EXTENDED tag {name!r} must be resolved via TagDict")
         try:
             return self.tags[name]
         except KeyError:
@@ -228,7 +265,37 @@ class AttributeSpec:
             tags={t.name: t.id for t in tags},
             supported_date_ranges=frozenset(attr.supported_date_ranges),
             value_ranges={t.id: ValueRange.from_proto(t.value_range) for t in tags if t.HasField("value_range")},
+            agg_func=attr.agg_func,
+            attribute_type=attr.attribute_type,
         )
+
+
+class TagDict:
+    """`silver.tag_dict` của một attribute EXTENDED: `tag_string → tag_id` append-only, không tái sử dụng (§3.1)."""
+
+    def __init__(self) -> None:
+        self._ids: dict[str, int] = {}
+        self._names: list[str] = []
+
+    def encode(self, tag_string: str) -> int:
+        """Tra hoặc cấp `tag_id` mới (≥ 1) — dùng ở L2 khi nạp event."""
+        if not tag_string:
+            raise ModelError("tag_string must not be empty")
+        tag_id = self._ids.get(tag_string)
+        if tag_id is None:
+            self._names.append(tag_string)
+            tag_id = self._ids[tag_string] = len(self._names)
+        return tag_id
+
+    def lookup(self, tag_string: str) -> int | None:
+        """Chỉ tra — dùng khi evaluate segment (chuỗi chưa gặp → None → bitmap rỗng)."""
+        return self._ids.get(tag_string)
+
+    def name(self, tag_id: int) -> str:
+        return self._names[tag_id - 1]
+
+    def snapshot(self) -> dict[str, int]:
+        return dict(self._ids)
 
 
 # --------------------------------------------------------------------------- input (silver)
@@ -450,13 +517,33 @@ def state_delta(intervals: Iterable[StateInterval], day: int, *, snapshot: bool 
     return out
 
 
-def reduce_pv_day(kind: Kind, events: Iterable[ValueEvent]) -> TagSums:
-    """`gold.pv_daily`: SUM theo (tag_id, uidx); PARTIAL_VALUE luôn tag 0."""
+def aggregator(agg_func: int) -> Callable[[Decimal, Decimal], Decimal]:
+    """Phép ⊕ của `aggFunc` — dùng cho cả reduce trong ngày lẫn ghép block (§3.2.1, §4.2)."""
+    match agg_func:
+        case AggFunc.SUM | AggFunc.COUNT:
+            return lambda a, b: a + b
+        case AggFunc.MIN:
+            return min
+        case AggFunc.MAX:
+            return max
+        case _:
+            raise ModelError(f"unsupported agg_func {agg_func} (AVG / DISTINCT_COUNT / FIRST / LAST ngoài v1)")
+
+
+def event_value(agg_func: int, value: Decimal) -> Decimal:
+    """Giá trị một event đóng góp: COUNT = 1, còn lại = `value`."""
+    return Decimal(1) if agg_func == AggFunc.COUNT else value
+
+
+def reduce_pv_day(kind: Kind, events: Iterable[ValueEvent], agg_func: int = AggFunc.SUM) -> TagSums:
+    """`gold.pv_daily`: AGG theo (tag_id, uidx); PARTIAL_VALUE luôn tag 0."""
+    op = aggregator(agg_func)
     out: TagSums = {}
     for ev in events:
         validate_value_event(kind, ev)
         by_user = out.setdefault(ev.tag, {})
-        by_user[ev.uidx] = by_user.get(ev.uidx, Decimal(0)) + ev.value
+        v = event_value(agg_func, ev.value)
+        by_user[ev.uidx] = op(by_user[ev.uidx], v) if ev.uidx in by_user else v
     return out
 
 
@@ -474,13 +561,21 @@ def union_sets(a: Mapping[int, BitMap], b: Mapping[int, BitMap]) -> TagSets:
     return out
 
 
-def add_sums(a: Mapping[int, Mapping[int, Decimal]], b: Mapping[int, Mapping[int, Decimal]]) -> TagSums:
+def merge_values(
+    a: Mapping[int, Mapping[int, Decimal]], b: Mapping[int, Mapping[int, Decimal]], agg_func: int = AggFunc.SUM
+) -> TagSums:
+    """⊕ hai TagSums theo `aggFunc`; user chỉ có ở một bên giữ nguyên giá trị."""
+    op = aggregator(agg_func)
     out: TagSums = {t: dict(m) for t, m in a.items()}
     for t, m in b.items():
         acc = out.setdefault(t, {})
         for u, v in m.items():
-            acc[u] = acc.get(u, Decimal(0)) + v
+            acc[u] = op(acc[u], v) if u in acc else v
     return out
+
+
+def add_sums(a: Mapping[int, Mapping[int, Decimal]], b: Mapping[int, Mapping[int, Decimal]]) -> TagSums:
+    return merge_values(a, b, AggFunc.SUM)
 
 
 def drop_empty(s: Mapping[int, BitMap]) -> TagSets:

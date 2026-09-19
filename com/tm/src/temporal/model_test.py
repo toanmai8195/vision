@@ -8,18 +8,22 @@ from pyroaring import BitMap
 
 from com.tm.src.temporal.model import (
     ANY_TAG,
+    AggFunc,
     AttributeSpec,
+    AttributeType,
     DataType,
     DateRange,
     FeedMode,
     Kind,
     ModelError,
     StateInterval,
+    TagDict,
     TagEvent,
     ValueEvent,
     ValueRange,
     ds_of_ts_ms,
     kind_of,
+    merge_values,
     parse_day,
     parse_ts_ms,
     reduce_mutex_day,
@@ -225,6 +229,89 @@ def test_reduce_pv_day():
         reduce_pv_day(Kind.PARTIAL_VALUE_BY_TAG, events)
     with pytest.raises(ModelError):
         reduce_pv_day(Kind.MUTEX_EVENT, events)
+
+
+
+# --------------------------------------------------------------------------- P1b: aggFunc, EXTENDED
+
+PV_EVENTS = [
+    ValueEvent("a", 1, ts_ms_of(D, 10), 0, Decimal(300)),
+    ValueEvent("b", 1, ts_ms_of(D, 20), 0, Decimal(-50)),
+    ValueEvent("c", 1, ts_ms_of(D, 30), 0, Decimal(700)),
+    ValueEvent("d", 2, ts_ms_of(D, 40), 0, Decimal(0)),
+]
+
+
+@pytest.mark.parametrize(
+    "agg,want",
+    [
+        (AggFunc.SUM, {1: Decimal(950), 2: Decimal(0)}),
+        (AggFunc.COUNT, {1: Decimal(3), 2: Decimal(1)}),
+        (AggFunc.MIN, {1: Decimal(-50), 2: Decimal(0)}),
+        (AggFunc.MAX, {1: Decimal(700), 2: Decimal(0)}),
+    ],
+)
+def test_reduce_pv_day_agg(agg, want):
+    assert reduce_pv_day(Kind.PARTIAL_VALUE, PV_EVENTS, agg) == {0: want}
+
+
+@pytest.mark.parametrize(
+    "agg,want",
+    [
+        (AggFunc.SUM, {1: Decimal(8), 2: Decimal(5)}),
+        (AggFunc.COUNT, {1: Decimal(8), 2: Decimal(5)}),
+        (AggFunc.MIN, {1: Decimal(3), 2: Decimal(5)}),
+        (AggFunc.MAX, {1: Decimal(5), 2: Decimal(5)}),
+    ],
+)
+def test_merge_values(agg, want):
+    a = {7: {1: Decimal(3)}}
+    b = {7: {1: Decimal(5), 2: Decimal(5)}}
+    assert merge_values(a, b, agg) == {7: want}
+    assert a == {7: {1: Decimal(3)}}  # không sửa input
+
+
+def test_unsupported_agg_is_explicit_error():
+    with pytest.raises(ModelError):
+        reduce_pv_day(Kind.PARTIAL_VALUE, PV_EVENTS, 99)
+
+
+R_ = frozenset({DateRange.A7})
+
+
+def test_attribute_spec_agg_func():
+    pv = AttributeSpec(1, "pv", Kind.PARTIAL_VALUE_BY_TAG, {"a": 1}, R_)
+    assert pv.agg_func == AggFunc.SUM  # UNSPECIFIED → SUM
+    assert AttributeSpec(1, "pv", Kind.PARTIAL_VALUE_BY_TAG, {"a": 1}, R_, agg_func=AggFunc.MAX).agg_func == AggFunc.MAX
+    for kind in (Kind.MUTEX_EVENT, Kind.NOT_MUTEX_STATE):
+        with pytest.raises(ModelError):
+            AttributeSpec(1, "x", kind, {"a": 1}, R_, agg_func=AggFunc.SUM)
+    with pytest.raises(ModelError):
+        AttributeSpec(1, "pv", Kind.PARTIAL_VALUE_BY_TAG, {"a": 1}, R_, agg_func=99)
+
+
+@pytest.mark.parametrize("kind", list(Kind), ids=lambda k: k.value)
+def test_attribute_spec_extended(kind):
+    ok = kind in (Kind.NOT_MUTEX_EVENT, Kind.NOT_MUTEX_STATE, Kind.PARTIAL_VALUE_BY_TAG)
+    if ok:
+        a = AttributeSpec(1, "ext", kind, {}, R_, attribute_type=AttributeType.EXTENDED)
+        assert a.is_extended
+        with pytest.raises(ModelError):
+            a.tag_id("oa_1")  # phải tra qua TagDict
+        with pytest.raises(ModelError):
+            AttributeSpec(1, "ext", kind, {"a": 1}, R_, attribute_type=AttributeType.EXTENDED)
+    else:
+        with pytest.raises(ModelError):
+            AttributeSpec(1, "ext", kind, {}, R_, attribute_type=AttributeType.EXTENDED)
+
+
+def test_tag_dict_append_only():
+    d = TagDict()
+    assert d.encode("oa_1") == 1 and d.encode("oa_2") == 2 and d.encode("oa_1") == 1
+    assert d.lookup("oa_3") is None and d.name(2) == "oa_2"
+    assert d.snapshot() == {"oa_1": 1, "oa_2": 2}
+    with pytest.raises(ModelError):
+        d.encode("")
 
 
 if __name__ == "__main__":

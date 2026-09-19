@@ -7,31 +7,38 @@
 > - Phase nào đụng dữ liệu phải chạy đúng **cả 4 loại**: `MUTEX` · `NOT_MUTEX` · `PARTIAL_VALUE` · `PARTIAL_VALUE_BY_TAG` (MUTEX/NOT_MUTEX: cả `EVENT` và `STATE`, có REMOVE).
 > - Đổi semantics trong lúc làm → cập nhật `CLAUDE.md` + docs + golden test trước.
 > - Service mới phải có `/metrics` + log có cấu trúc ngay từ đầu (không đợi P7).
+> - Mỗi phase mở đầu bằng dòng **Tóm tắt**: phase làm gì · sau phase có dữ liệu/sản phẩm gì, nằm ở đâu.
+> - Mỗi phase có doc chi tiết trong `com/tm/docs/phases/`: input/output (dữ liệu gì, lưu ở đâu), flow, từng bước dùng công nghệ gì và dữ liệu biến đổi ra sao (ví dụ theo `data-flow-examples.md`).
 
 ## Tổng quan
 
 ```
 P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) ──▶ P4 Temporal & Range (L4–L5) ──▶ P5 Segment ──▶ P6 Activation
                 │                                                        ▲                                         │
-                └──▶ P1 Semantics core (pure, không cần infra) ──────────┘                                         ▼
+                └──▶ P1 Semantics core ──▶ P1b aggFunc + EXTENDED ───────┘                                         ▼
                                                                                                  P7 Observability ──▶ P8 Scale & hardening
 ```
 
-| Phase | Tên | Phụ thuộc | Chạy song song được với |
-|---|---|---|---|
-| P0 | Foundation | — | — |
-| P1 | Semantics core (reference + planner) | P0 | P2, P3 |
-| P2 | Ingestion & Silver | P0 | P1 |
-| P3 | Daily layer (L3) | P2 | P1 |
-| P4 | Temporal & Range (L4–L5) | P1, P3 | — |
-| P5 | Segment (manager + builder) | P4 | codec + DSL validate làm sớm từ P1 |
-| P6 | Activation API | P5 (có thể bắt đầu với file `.roar` giả sau khi có codec) | P7 |
-| P7 | Observability | P2 trở đi (làm dần) | P6 |
-| P8 | Scale & hardening | P6, P7 | — |
+| Phase | Tên | Trạng thái | Phụ thuộc | Chạy song song được với |
+|---|---|---|---|---|
+| P0 | Foundation | ✅ xong | — | — |
+| P1 | Semantics core (reference + planner) | ✅ xong | P0 | P2, P3 |
+| P1b | Mở rộng semantics: `aggFunc` + `EXTENDED` | ✅ xong | P1 | P2, P3 |
+| P2 | Ingestion & Silver | ⬜ | P0 | P1, P1b |
+| P3 | Daily layer (L3) | ⬜ | P2 | P1b |
+| P4 | Temporal & Range (L4–L5) | ⬜ | P1b, P3 | — |
+| P5 | Segment (manager + builder) | ⬜ | P4 | codec + DSL validate làm sớm từ P1 |
+| P6 | Activation API | ⬜ | P5 (có thể bắt đầu với file `.roar` giả sau khi có codec) | P7 |
+| P7 | Observability | ⬜ | P2 trở đi (làm dần) | P6 |
+| P8 | Scale & hardening | ⬜ | P6, P7 | — |
 
 ---
 
 ## P0 — Foundation
+
+> **Tóm tắt:** P0 dựng nền móng repo. Sau P0 có: Bazel build/test được Go · Kotlin · Python; contract proto `event` / `catalog` / `segment`; schema Postgres `meta.*` với 6 attribute mẫu (đủ 4 loại); stack local (Kafka, Flink, MinIO + Iceberg, Spark, StarRocks, Postgres, Airflow, Redis, Prometheus, Grafana) chạy bằng docker compose — **chưa có dữ liệu nghiệp vụ**.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p0-foundation.md`](phases/p0-foundation.md)
 
 **Mục tiêu**: repo build được mọi ngôn ngữ, chạy được stack local, có contract dữ liệu.
 
@@ -55,6 +62,10 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 ---
 
 ## P1 — Semantics core (pure logic)
+
+> **Tóm tắt:** P1 khoá đúng semantics 4 loại dữ liệu bằng code Python thuần, chạy trong bộ nhớ. Sau P1 có: thư viện `com/tm/src/temporal/` (reference ngây thơ, model L3, dyadic block, LATEST/POS/STATE, date range, planner, engine) và `com/tm/src/segment/dsl/` (validate + evaluator), golden test + property test 10K case/loại — **không ghi vào database nào**; đây là chuẩn để đối chiếu SQL ở P3–P5.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p1-semantics-core.md`](phases/p1-semantics-core.md)
 
 **Mục tiêu**: khoá đúng semantics trước khi viết SQL. Không cần StarRocks/Spark.
 
@@ -80,10 +91,49 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 - Golden: `testdata/golden/{s1_payment,s2_cdc,s3_churn,data_types,segments,blocks}.yaml` (data-flow-examples + data-types).
 - Property test: `bazel test //com/tm/src/temporal:property_test_<kind>` — 6 target (4 loại × EVENT/STATE), mỗi target 10K case.
 - `TODO(verify)`: PARTIAL_VALUE có cả `tags` lẫn `valueRange` → hiện từ chối (chưa định nghĩa nghĩa).
+- Phạm vi P1: chỉ `aggFunc = SUM` và tag `STANDARD`; phần mở rộng ở P1b.
+
+---
+
+## P1b — Mở rộng semantics: `aggFunc` + `EXTENDED` ✅
+
+> **Tóm tắt:** P1b mở rộng thư viện P1 theo CLAUDE.md §3.2.1 và §3.6: PARTIAL_VALUE(_BY_TAG) có `aggFunc` COUNT/MIN/MAX ngoài SUM; tag `EXTENDED` (chuỗi tự do, cardinality cao) cho NOT_MUTEX và PARTIAL_VALUE_BY_TAG, tính range theo mức sử dụng. Sau P1b có: như P1 nhưng hỗ trợ đủ các tổ hợp mới; proto `catalog` + Postgres `meta.attribute` có `agg_func`, `attribute_type`, bảng mới `meta.condition_usage` — **vẫn chưa có dữ liệu thật**.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p1b-aggfunc-extended.md`](phases/p1b-aggfunc-extended.md)
+
+**Mục tiêu**: khoá semantics mới trước khi viết SQL (P3–P4).
+
+**Việc cần làm**
+- [x] Proto `catalog/v1`: enum `AggFunc {SUM, COUNT, MIN, MAX}`, `AttributeType {STANDARD, EXTENDED}`; field trong `Attribute`. Migration Postgres: `meta.attribute.agg_func`, `meta.attribute.attribute_type`, bảng `meta.condition_usage`. Luật catalog: `aggFunc` chỉ cho PARTIAL_VALUE*; `EXTENDED` chỉ cho NOT_MUTEX (EVENT/STATE) và PARTIAL_VALUE_BY_TAG — MUTEX/PARTIAL_VALUE + EXTENDED → lỗi tường minh.
+- [x] `model.py`: `AttributeSpec` có `agg_func`, `attribute_type`; `reduce_pv_day` và phép ⊕ block theo `aggFunc`; dictionary `tag_string → tag_id` append-only (thuần, cho test).
+- [x] `reference.py`: aggregate theo `aggFunc`; tag EXTENDED là chuỗi.
+- [x] `planner.py` / `engine.py`: range của `EXTENDED` chỉ cho tag trong `condition_usage`; tag dùng lần đầu → on-demand.
+- [x] DSL validate + evaluator: tag EXTENDED không kiểm catalog, tag chưa có trong dict → rỗng; matrix thêm chiều `aggFunc` × `attributeType`.
+- [x] Docs: thêm ví dụ vào `data-types.md`, `data-flow-examples.md` (vd `txn_count` COUNT, `txn_max` MAX, `oa_follow` NOT_MUTEX EXTENDED, `gift_value` PARTIAL_VALUE_BY_TAG EXTENDED) = golden mới.
+- [x] Property test thêm target: PARTIAL_VALUE(_BY_TAG) × {COUNT, MIN, MAX}; NOT_MUTEX EXTENDED (EVENT, STATE); PARTIAL_VALUE_BY_TAG EXTENDED.
+- [x] Cập nhật `com/tm/src/common/python/catalog/validation.py` + seed Postgres.
+
+**Đã làm**
+- Proto `catalog/v1`: `AggFunc`, `AttributeType`, field `Attribute.agg_func` (8), `attribute_type` (9).
+- Postgres: `V3__agg_func_attribute_type.sql` (cột + CHECK + trigger + `meta.condition_usage`), `V4__seed_p1b_examples.sql` (`txn_count`, `txn_max`, `oa_follow`, `gift_value`) — đã chạy thử V1→V4 trên DB tạm, 11 ca chấp nhận/từ chối đúng.
+- `model.py`: `aggregator` / `merge_values` / `reduce_pv_day(agg)`, `TagDict`, `AttributeSpec.agg_func/attribute_type`; `latest.py`: POS/STATE chỉ cập nhật tag có thay đổi.
+- `planner.py`: `usage` → `RangeStep.tags` (scope), DQ `TAG_DICT_APPEND_ONLY`; `engine.py`: range theo scope, `query_tag` on-demand + ghi `usage`, LAST_MONTH carry-forward tính lại khi scope mở rộng.
+- DSL: tag EXTENDED không kiểm catalog, chuỗi chưa có trong `tag_dict` → rỗng; matrix thêm chiều `aggFunc` × `attributeType`.
+- Golden `p1b_aggfunc_extended.yaml` + `seg_1003 = {1}`; `engine_test.py` (usage tăng giữa tháng).
+- Property test: 15 target (6 của P1 + 9 mới), mỗi target 10K case.
+
+**Done khi**
+- [x] Golden mới pass (mỗi `aggFunc`, mỗi tổ hợp EXTENDED hợp lệ); tổ hợp không hỗ trợ ra lỗi tường minh.
+- [x] Property test pass ≥ 10K case cho mỗi target mới; target P1 vẫn xanh.
+- [x] `bazel build //... && bazel test //...` xanh.
 
 ---
 
 ## P2 — Ingestion & Silver (L0–L2)
+
+> **Tóm tắt:** P2 hoàn thiện phần ingest dữ liệu. Sau P2 có: event thô trong Kafka và Iceberg `bronze.*_raw`; dữ liệu sạch (dedup, `ds` theo ICT, SCD2) trong Iceberg `silver.payment_txn`, `silver.user_profile_scd2`, `silver.user_product_scd2`, `silver.churn_score`; dictionary `silver.user_dict` (user → `uidx`) và `silver.tag_dict` (tag EXTENDED → `tag_id`), sync Redis + `meta.user_dict_rev`.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p2-ingestion-silver.md`](phases/p2-ingestion-silver.md)
 
 **Mục tiêu**: 3 source chảy vào Iceberg silver, có `uidx`.
 
@@ -94,16 +144,21 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 - [ ] PySpark file loader S3 → bronze (sensor `_SUCCESS`).
 - [ ] PySpark silver: `payment_txn` (dedup, `ds` ICT, DLQ), `user_profile_scd2` + `user_product_scd2` (MERGE CDC), `churn_score`.
 - [ ] Dictionary `user_id → uidx` append-only + sync Redis + `meta.user_dict_rev`; `UNIVERSE(ds)`.
+- [ ] Dictionary `silver.tag_dict (attr_id, tag_string) → tag_id` append-only cho attribute `EXTENDED`.
 - [ ] Airflow DAG `vision_silver_<source>`.
 
 **Done khi**
 - Chạy simulator với dữ liệu của examples → silver khớp bảng L2 trong `data-flow-examples.md` (gồm dedup e-9001, e-9003 sang ds 09-15, e-9005 late).
 - Rerun DAG cùng `ds` cho kết quả y hệt (idempotent).
-- Silver giữ đủ thông tin cho 4 loại: thứ tự `(event_ts, event_id)`, `value` DECIMAL, `tag` cho BY_TAG, SCD2 cho STATE.
+- Silver giữ đủ thông tin cho 4 loại: thứ tự `(event_ts, event_id)`, `value` DECIMAL, `tag` cho BY_TAG, SCD2 cho STATE, `tag_string` cho EXTENDED.
 
 ---
 
 ## P3 — Daily layer (L3)
+
+> **Tóm tắt:** P3 chuyển silver thành dữ liệu theo ngày. Sau P3 có (StarRocks): `gold.tag_daily` — bitmap user theo `(ngày, attribute, tag)` cho ADD/DEL/SIG (EVENT) và ADDED/REMOVED (STATE); `gold.pv_daily` — giá trị aggregate (`aggFunc`) theo `(ngày, attribute, tag, user)`; kết quả DQ trong `dq.result`.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p3-daily.md`](phases/p3-daily.md)
 
 **Mục tiêu**: bảng daily trong StarRocks cho 4 loại.
 
@@ -113,18 +168,23 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
   - MUTEX EVENT: `ADD(d,t)` (ADD cuối ngày), `DEL(d,t)`, `ADD(d,0)`.
   - NOT_MUTEX EVENT: `ADD/DEL` theo signal cuối ngày từng tag, `SIG`.
   - MUTEX/NOT_MUTEX STATE: `ADDED/REMOVED` từ SCD2.
-  - PARTIAL_VALUE: SUM `(ds, uidx)`; PARTIAL_VALUE_BY_TAG: SUM `(ds, tag, uidx)`.
+  - PARTIAL_VALUE: AGG (`aggFunc`) `(ds, uidx)`; PARTIAL_VALUE_BY_TAG: AGG `(ds, tag, uidx)`.
+  - EXTENDED: `tag_string → tag_id` qua `silver.tag_dict`.
 - [ ] Ghi idempotent `DELETE (ds, attr_id)` + `INSERT`.
-- [ ] DQ cơ bản (§9): mutex rời nhau, `ADD ∩ DEL = ∅`, tổng pv = tổng silver (cả theo tag), `uidx ⊆ UNIVERSE`.
+- [ ] DQ cơ bản (§9): mutex rời nhau, `ADD ∩ DEL = ∅`, AGG pv = AGG silver (cả theo tag), `uidx ⊆ UNIVERSE`, `tag_dict` append-only.
 - [ ] Airflow `vision_gold_daily` (dynamic task mapping theo `attrGroupId`).
 
 **Done khi**
-- Output L3 == `model.py` của P1 trên cùng input (golden + dataset ngẫu nhiên nhỏ) cho **cả 4 loại**.
+- Output L3 == `model.py` của P1/P1b trên cùng input (golden + dataset ngẫu nhiên nhỏ) cho **cả 4 loại**, mọi `aggFunc`, STANDARD + EXTENDED.
 - DQ pass; rerun không đổi kết quả.
 
 ---
 
 ## P4 — Temporal & Range (L4–L5)
+
+> **Tóm tắt:** P4 tính kết quả theo date range mỗi ngày. Sau P4 có (StarRocks): trung gian `gold.tag_block` / `gold.pv_block`, `gold.tag_latest` + `gold.tag_state_checkpoint`; kết quả cuối `gold.tag_range_bitmap` (bitmap user theo tag × A1…A180, IN_MONTH, LAST_MONTH, ALWAYS_ACTIVE) và `gold.pv_range_value` (giá trị aggregate theo user × date range); custom range tính on-demand. Airflow chạy daily / late data / backfill.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p4-temporal-range.md`](phases/p4-temporal-range.md)
 
 **Mục tiêu**: mỗi ngày có đủ mọi date range cho mọi tag.
 
@@ -134,21 +194,26 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
   - MUTEX: `LATEST ∩ SEEN` (block trên `ADD(·,0)`).
   - NOT_MUTEX: `POS ∩ SIG_window` (block trên `SIG(·,t)`).
   - STATE: `STATE(r,t)`.
-  - PARTIAL_VALUE: SUM block → `pv_range_value` → tag `valueRange` → `tag_range_bitmap`.
-  - PARTIAL_VALUE_BY_TAG: SUM block theo tag → `pv_range_value`.
+  - PARTIAL_VALUE: AGG block → `pv_range_value` → tag `valueRange` → `tag_range_bitmap`.
+  - PARTIAL_VALUE_BY_TAG: AGG block theo tag → `pv_range_value`.
+  - EXTENDED: range chỉ cho tag trong `meta.condition_usage` (usage-driven).
 - [ ] Incremental IN_MONTH / LAST_MONTH / ALWAYS_ACTIVE.
 - [ ] Custom range on-demand (API nội bộ cho builder/manager) + cache.
 - [ ] DQ: monotonic window, mutex rời nhau theo window, STATE consistency.
 - [ ] Airflow: `vision_gold_temporal`, `vision_dq`, `vision_late_data`, `vision_backfill`, `vision_maintenance`.
 
 **Done khi**
-- `tag_range_bitmap` / `pv_range_value` == reference (P1) cho golden + dataset ngẫu nhiên, **từng loại × từng date range**.
+- `tag_range_bitmap` / `pv_range_value` == reference (P1/P1b) cho golden + dataset ngẫu nhiên, **từng loại × từng date range**, mọi `aggFunc`, STANDARD + EXTENDED.
 - Late data 3 ngày và backfill cho kết quả == chạy lại từ đầu.
 - Chạy 30 ngày liên tiếp trên local không lỗi.
 
 ---
 
 ## P5 — Segment
+
+> **Tóm tắt:** P5 build segment từ các condition. Sau P5 có: bitmap segment trong StarRocks `seg.segment_bitmap`; file `.roar` + manifest trên S3 `s3://vision-segments/ds=…/`; định nghĩa + version trong Postgres `meta.segment`, `meta.segment_version`, `meta.condition_usage`; event publish trên Kafka `vision.segment.published.v1`; API quản lý segment (segment-manager).
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p5-segment.md`](phases/p5-segment.md)
 
 **Mục tiêu**: 5K segment/ngày build, version và publish được.
 
@@ -158,6 +223,7 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 - [ ] `segment-builder` (Go):
   - topo-sort segment tham chiếu segment;
   - condition cache `(ds, attr, tags, tagOp, dateRange|custom, valueRange)`;
+  - condition EXTENDED chưa materialize → on-demand + ghi `meta.condition_usage`;
   - MUTEX/NOT_MUTEX/PARTIAL_VALUE (tag định sẵn) → lấy bitmap; PARTIAL_VALUE ad-hoc & PARTIAL_VALUE_BY_TAG → query `pv_range_value`/`pv_block`;
   - evaluate AND/OR/SUB → S3 `.roar` + manifest → `seg.segment_bitmap` → Postgres `PUBLISHED` → Kafka `vision.segment.published.v1`;
   - retry idempotent, batch fetch giới hạn theo byte.
@@ -171,6 +237,10 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 ---
 
 ## P6 — Activation API
+
+> **Tóm tắt:** P6 phục vụ segment cho hệ thống khác. Sau P6 có: `activation-api` trả count / danh sách user / segment của user / contains với độ trễ ms (mmap `.roar`, cache `user_id ↔ uidx` trên Redis); export segment lớn ra file trên S3. Không tạo bảng dữ liệu mới.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p6-activation-api.md`](phases/p6-activation-api.md)
 
 **Mục tiêu**: phục vụ segment cho hệ thống khác.
 
@@ -194,6 +264,10 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 
 ## P7 — Observability
 
+> **Tóm tắt:** P7 giúp biết hệ thống chạy đúng hạn, đúng dữ liệu. Sau P7 có: metrics trong Prometheus, dashboard Grafana (SLA pipeline, chi phí theo loại dữ liệu, DQ, segment build, API), alert; số liệu theo tag/segment trong StarRocks `dq.result`, `seg.build_stats`.
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p7-observability.md`](phases/p7-observability.md)
+
 **Mục tiêu**: biết hệ thống có đúng hạn, đúng dữ liệu không.
 
 **Việc cần làm**
@@ -211,10 +285,14 @@ P0 Foundation ──┬──▶ P2 Ingestion & Silver ──▶ P3 Daily (L3) �
 
 ## P8 — Scale & hardening
 
+> **Tóm tắt:** P8 đưa hệ thống lên quy mô thiết kế. Sau P8 có: số đo thật ở 100M user / 500 attribute / 5K segment trong `capacity.md`; cấu hình StarRocks đã tune; quyết định tối ưu PARTIAL_VALUE và EXTENDED; runbook vận hành (backfill, rollback, late data, đổi định nghĩa tag).
+>
+> 📄 Chi tiết flow dữ liệu (input → các bước → output, công nghệ từng bước): [`phases/p8-scale-hardening.md`](phases/p8-scale-hardening.md)
+
 **Mục tiêu**: đạt quy mô thiết kế và vận hành được.
 
 **Việc cần làm**
-- [ ] Synthetic data: 100M user, 500 attribute (phân bổ 4 loại theo `capacity.md`), 500–1000 tag/attr, 400 ngày, 5K segment.
+- [ ] Synthetic data: 100M user, 500 attribute (phân bổ 4 loại theo `capacity.md`), 500–1000 tag/attr (STANDARD) + vài attribute EXTENDED hàng trăm nghìn tag, 400 ngày, 5K segment.
 - [ ] Benchmark từng bước L3→L6; đo storage thực tế.
 - [ ] Quyết định tối ưu PARTIAL_VALUE / PARTIAL_VALUE_BY_TAG: chỉ `supportedDateRanges` → rolling incremental → BSI (chỉ khi cần).
 - [ ] Tune StarRocks: bucket, partition, tablet, spill, resource group.

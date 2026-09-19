@@ -3,7 +3,8 @@
 Đây là "implementation tối ưu" mà property test so với `reference` (CLAUDE.md §4.4). Bảng StarRocks ở P4
 có đúng các bước này; engine giữ chúng trong dict:
 `daily` ~ `gold.tag_daily`/`gold.pv_daily`, `blocks` ~ `gold.tag_block`/`gold.pv_block`,
-`latest` ~ `gold.tag_latest` + `gold.tag_state_checkpoint`, `ranges` ~ `gold.tag_range_bitmap`/`gold.pv_range_value`.
+`latest` ~ `gold.tag_latest` + `gold.tag_state_checkpoint`, `ranges` ~ `gold.tag_range_bitmap`/`gold.pv_range_value`,
+`usage` ~ `meta.condition_usage` (EXTENDED, §3.6), `tag_dict` ~ `silver.tag_dict`.
 """
 
 from __future__ import annotations
@@ -26,11 +27,14 @@ from com.tm.src.temporal.model import (
     ModelError,
     StateDaily,
     StateInterval,
+    TagDict,
     TagEvent,
     TagSets,
     TagSums,
     ValueEvent,
-    add_sums,
+    aggregator,
+    event_value,
+    merge_values,
     reduce_mutex_day,
     reduce_not_mutex_day,
     reduce_pv_day,
@@ -106,22 +110,37 @@ class Silver:
 
 @dataclass
 class RangeOutput:
-    """Một `(ds, date_range)`: `tags` ~ `tag_range_bitmap`, `sums` ~ `pv_range_value` (chỉ loại PARTIAL_VALUE*)."""
+    """Một `(ds, date_range)`: `tags` ~ `tag_range_bitmap`, `sums` ~ `pv_range_value` (chỉ loại PARTIAL_VALUE*).
+
+    `scope`: None = mọi tag; EXTENDED = tập tag đã materialize (tag ngoài scope phải tính on-demand).
+    """
 
     tags: TagSets = field(default_factory=dict)
     sums: TagSums | None = None
+    scope: frozenset[int] | None = None
+
+    def covers(self, tag_id: int) -> bool:
+        return self.scope is None or tag_id in self.scope
+
+    def restrict(self, scope: frozenset[int]) -> RangeOutput:
+        return RangeOutput(
+            tags={t: bm for t, bm in self.tags.items() if t in scope},
+            sums=None if self.sums is None else {t: m for t, m in self.sums.items() if t in scope},
+            scope=scope,
+        )
 
 
 def _or_tagged(a: TagSets, b: TagSets) -> TagSets:
     return union_sets(a, b)
 
 
-def _block_store(kind: Kind) -> BlockStore:
-    match kind:
+def _block_store(attr: AttributeSpec) -> BlockStore:
+    match attr.kind:
         case Kind.MUTEX_EVENT | Kind.NOT_MUTEX_EVENT | Kind.MUTEX_STATE | Kind.NOT_MUTEX_STATE:
             return BlockStore(_or_tagged, dict, lambda v: not v)
         case Kind.PARTIAL_VALUE | Kind.PARTIAL_VALUE_BY_TAG:
-            return BlockStore(add_sums, dict, lambda v: not v)
+            agg = attr.agg_func
+            return BlockStore(lambda a, b: merge_values(a, b, agg), dict, lambda v: not v)
 
 
 _EXPECTED: dict[Kind, tuple[set[DailyTable], BlockSource | None, LatestKind | None]] = {
@@ -139,16 +158,30 @@ _EXPECTED: dict[Kind, tuple[set[DailyTable], BlockSource | None, LatestKind | No
 
 
 class AttributeEngine:
-    def __init__(self, attr: AttributeSpec, silver: Silver, *, history_start: int, universe_of: Callable[[int], BitMap]):
+    def __init__(
+        self,
+        attr: AttributeSpec,
+        silver: Silver,
+        *,
+        history_start: int,
+        universe_of: Callable[[int], BitMap],
+        tag_dict: TagDict | None = None,
+    ):
         if silver.kind is not attr.kind:
             raise ModelError(f"silver kind {silver.kind} != attribute kind {attr.kind}")
+        if attr.is_extended != (tag_dict is not None):
+            raise ModelError(f"{attr.name}: tag_dict is required for EXTENDED and only for EXTENDED")
+        self.tag_dict = tag_dict
+        # ~ meta.condition_usage: date_range → tag_id được segment dùng (chỉ EXTENDED)
+        self.usage: dict[int, set[int]] = defaultdict(set)
+        self._tag_dict_seen: dict[str, int] = {}
         self.attr = attr
         self.kind = attr.kind
         self.silver = silver
         self.history_start = history_start
         self._universe_of = universe_of
         self.daily: dict[int, LabelDaily | StateDaily | TagSums] = {}
-        self.blocks: BlockStore = _block_store(attr.kind)
+        self.blocks: BlockStore = _block_store(attr)
         self.latest: LatestStore | None = LatestStore(attr.kind, self._daily_of) if attr.kind.is_label else None
         self.ranges: dict[int, dict[int, RangeOutput]] = {}
         self.ds: int | None = None
@@ -179,8 +212,10 @@ class AttributeEngine:
                 if lk is not latest_kind or self.latest is None:
                     raise ModelError(f"{self.kind.value}: unexpected checkpoint {lk}")
                 self.latest.checkpoint(day)
-            case RangeStep(ds=ds, date_range=dr, mode=mode):
-                self._range_step(ds, dr, mode)
+            case RangeStep(ds=ds, date_range=dr, mode=mode, tags=tags):
+                if (tags is not None) != self.attr.is_extended:
+                    raise ModelError(f"{self.attr.name}: range scope must be set exactly for EXTENDED")
+                self._range_step(ds, dr, mode, None if tags is None else frozenset(tags))
             case DqStep(ds=ds, check=check, days=days):
                 self._dq_step(ds, check, days)
             case _:
@@ -212,21 +247,27 @@ class AttributeEngine:
                 daily = state_delta(self.silver.intervals(), day, snapshot=snapshot)
                 block_value = dict(daily.removed)
             case Kind.PARTIAL_VALUE | Kind.PARTIAL_VALUE_BY_TAG:
-                daily = reduce_pv_day(self.kind, self.silver.value_events(day))
+                daily = reduce_pv_day(self.kind, self.silver.value_events(day), self.attr.agg_func)
                 block_value = daily
         self.daily[day] = daily
         self.blocks.set_day(day, block_value)
 
     # ------------------------------------------------------------------ range
 
-    def compute(self, w: Window) -> RangeOutput:
-        """Kết quả của window bất kỳ (precompute hoặc custom on-demand)."""
+    def compute(self, w: Window, scope: frozenset[int] | None = None) -> RangeOutput:
+        """Kết quả của window bất kỳ (precompute hoặc custom on-demand); `scope` giới hạn tag (EXTENDED)."""
+        out = self._compute(w, scope)
+        return out if scope is None else out.restrict(scope)
+
+    def _compute(self, w: Window, scope: frozenset[int] | None) -> RangeOutput:
         clamped = w.clamp(self.history_start)
         match self.kind:
             case Kind.MUTEX_EVENT | Kind.NOT_MUTEX_EVENT:
                 if clamped is None:
                     return RangeOutput()
                 latest_r = self.latest.state_at(w.r)
+                if scope is not None:  # chỉ đụng tag trong scope — chi phí tỉ lệ tag được dùng
+                    latest_r = {t: bm for t, bm in latest_r.items() if t in scope}
                 window_blocks = None if w.always_active else self.blocks.window(clamped.l, clamped.r)
                 return RangeOutput(tags=label_window(self.kind, latest_r, window_blocks))
             case Kind.MUTEX_STATE | Kind.NOT_MUTEX_STATE:
@@ -239,15 +280,17 @@ class AttributeEngine:
                 sums = self.blocks.window(clamped.l, clamped.r)
                 return RangeOutput(tags=pv_tag_bitmaps(self.kind, sums, self.attr.value_ranges), sums=sums)
 
-    def _range_step(self, ds: int, dr: int, mode: RangeMode) -> None:
+    def _range_step(self, ds: int, dr: int, mode: RangeMode, scope: frozenset[int] | None) -> None:
         if dr not in self.attr.supported_date_ranges:
             raise ModelError(f"{self.attr.name}: {dr} not in supported_date_ranges")
         out = None
         if mode is RangeMode.CARRY_FORWARD:
-            out = self.ranges.get(ds - 1, {}).get(dr)
-            # Không có bản ds−1 (engine mới khởi động giữa tháng) → tính lại, kết quả như nhau.
+            prev = self.ranges.get(ds - 1, {}).get(dr)
+            # Không có bản ds−1 (engine mới khởi động giữa tháng) hoặc scope EXTENDED mở rộng → tính lại.
+            if prev is not None and (scope is None or (prev.scope is not None and scope <= prev.scope)):
+                out = prev if scope is None else prev.restrict(scope)
         if out is None:
-            out = self.compute(window_of(dr, ds))
+            out = self.compute(window_of(dr, ds), scope)
         self.ranges.setdefault(ds, {})[dr] = out
         if self.ds is None or ds > self.ds:
             self.ds = ds
@@ -263,12 +306,29 @@ class AttributeEngine:
                 raise ModelError(f"{self.attr.name}: range {ref} not materialized for {to_date(ds)}") from None
         return self.compute(resolve_window(ref, ds))
 
+    def query_tag(self, ref: WindowRef, ds: int, tag_id: int) -> RangeOutput:
+        """Như `query` nhưng tag EXTENDED chưa materialize → tính on-demand và ghi usage (§3.6)."""
+        out = self.query(ref, ds)
+        if out.covers(tag_id):
+            return out
+        if isinstance(ref, int):
+            self.usage[ref].add(tag_id)  # ~ ghi meta.condition_usage → ngày sau precompute
+        return self.compute(resolve_window(ref, ds), frozenset({tag_id}))
+
+    def usage_snapshot(self) -> dict[int, frozenset[int]]:
+        return {dr: frozenset(tags) for dr, tags in self.usage.items()}
+
     # ConditionSource (segment evaluator)
+    def extended_tag_id(self, tag_string: str) -> int | None:
+        if self.tag_dict is None:
+            raise ModelError(f"{self.attr.name}: not an EXTENDED attribute")
+        return self.tag_dict.lookup(tag_string)
+
     def tag_bitmap(self, ref: WindowRef, ds: int, tag_id: int) -> BitMap:
-        return self.query(ref, ds).tags.get(tag_id, BitMap())
+        return self.query_tag(ref, ds, tag_id).tags.get(tag_id, BitMap())
 
     def pv_sums(self, ref: WindowRef, ds: int, tag_id: int) -> dict[int, Decimal]:
-        sums = self.query(ref, ds).sums
+        sums = self.query_tag(ref, ds, tag_id).sums
         if sums is None:
             raise ModelError(f"{self.attr.name}: {self.kind.value} has no partial value")
         return sums.get(tag_id, {})
@@ -299,7 +359,8 @@ class AttributeEngine:
                 chain = sorted((dr for dr in outs if dr in LAST_N), key=LAST_N.__getitem__)
                 chain += [dr for dr in outs if dr == DateRange.ALWAYS_ACTIVE]
                 for a, b in zip(chain, chain[1:]):
-                    for t in self.attr.tag_ids:
+                    tags = set(outs[a].tags) | set(outs[b].tags)
+                    for t in (t for t in tags if outs[a].covers(t) and outs[b].covers(t)):
                         if len(outs[a].tags.get(t, BitMap())) > len(outs[b].tags.get(t, BitMap())):
                             raise DqError(f"{name}: tag {t} {a} > {b}")
             case DqCheck.STATE_CONSISTENCY:
@@ -308,17 +369,28 @@ class AttributeEngine:
                     if fold_state(prev, self._daily_of(d)) != self.latest.state_at(d):
                         raise DqError(f"{name}: day {to_date(d)}")
             case DqCheck.PV_TOTAL | DqCheck.PV_TOTAL_BY_TAG:
+                # AGG theo aggFunc: SUM/COUNT so tổng; MIN/MAX so min/max (§9).
+                op = aggregator(self.attr.agg_func)
                 for d in days:
-                    silver: dict[int, Decimal] = defaultdict(Decimal)
+                    silver: dict[int, Decimal] = {}
                     for ev in self.silver.value_events(d):
-                        silver[ev.tag] += ev.value
-                    gold = {t: sum(m.values(), Decimal(0)) for t, m in self._daily_of(d).items()}
+                        v = event_value(self.attr.agg_func, ev.value)
+                        silver[ev.tag] = op(silver[ev.tag], v) if ev.tag in silver else v
+                    gold: dict[int, Decimal] = {}
+                    for t, m in self._daily_of(d).items():
+                        for v in m.values():
+                            gold[t] = op(gold[t], v) if t in gold else v
                     if check is DqCheck.PV_TOTAL:
-                        ok = sum(silver.values(), Decimal(0)) == sum(gold.values(), Decimal(0))
+                        ok = _fold(op, silver.values()) == _fold(op, gold.values())
                     else:
-                        ok = dict(silver) == gold
+                        ok = silver == gold
                     if not ok:
                         raise DqError(f"{name}: day {to_date(d)}")
+            case DqCheck.TAG_DICT_APPEND_ONLY:
+                snapshot = self.tag_dict.snapshot()
+                if any(snapshot.get(k) != v for k, v in self._tag_dict_seen.items()):
+                    raise DqError(f"{name}: tag_dict mapping changed or removed")
+                self._tag_dict_seen = snapshot
             case DqCheck.UIDX_IN_UNIVERSE:
                 universe = self._universe_of(ds)
                 for d in days:
@@ -338,3 +410,10 @@ class AttributeEngine:
             case dict():
                 return [BitMap(m.keys()) for m in daily.values()]
         raise ModelError(f"unknown daily {daily!r}")
+
+
+def _fold(op: Callable[[Decimal, Decimal], Decimal], values: Iterable[Decimal]) -> Decimal | None:
+    acc = None
+    for v in values:
+        acc = v if acc is None else op(acc, v)
+    return acc

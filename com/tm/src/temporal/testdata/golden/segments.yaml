@@ -8,6 +8,8 @@ sources:
   txn_category: txn_category
   txn_amount: txn_amount
   txn_amount_by_category: txn_amount_by_category
+  oa_follow: oa_follow        # p1b_aggfunc_extended.yaml (EXTENDED)
+  gift_value: gift_value      # p1b_aggfunc_extended.yaml (EXTENDED, PARTIAL_VALUE_BY_TAG)
 
 segments:
   - segment_id: seg_1001  # Churn mid/high A30, ở HN, không mua F&B 7 ngày
@@ -35,3 +37,15 @@ segments:
       - {rule: "children[0]", result: [1]}
       - {rule: "children[1]", result: [2]}
     result: [1, 2]
+
+  # P1b: EXTENDED — "nhận quà ≥ 100K trong 7 ngày (bất kỳ mã abc/xyz), trừ người đang follow OA oa_12345"
+  - segment_id: seg_1003
+    rule:
+      operator: SUB
+      children:
+        - condition: {attr: gift_value, tags: [gift_abc, gift_xyz], tagOp: OR, dateRange: A7, valueRange: {fromValue: "100000", fromInclusive: true}}
+        - condition: {attr: oa_follow, tags: [oa_12345], dateRange: A7}
+    steps:
+      - {rule: "children[0]", result: [1, 2]}
+      - {rule: "children[1]", result: [2]}
+    result: [1]

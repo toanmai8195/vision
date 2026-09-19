@@ -12,7 +12,7 @@ from pyroaring import BitMap
 
 from com.tm.src.segment.dsl.evaluator import evaluate, evaluate_condition
 from com.tm.src.temporal.blocks import block_days, blocks_closed_by, decompose
-from com.tm.src.temporal.model import ANY_TAG, DateRange, Kind, epoch_day, parse_day, to_date
+from com.tm.src.temporal.model import ANY_TAG, AggFunc, DateRange, Kind, epoch_day, parse_day, to_date
 from com.tm.src.temporal.ranges import CustomRange, window_of
 from com.tm.src.temporal.reference import Reference
 from com.tm.src.temporal.testing import (
@@ -26,7 +26,7 @@ from com.tm.src.temporal.testing import (
 )
 
 GOLDEN = Path(__file__).parent / "testdata" / "golden"
-CASE_FILES = ["s1_payment.yaml", "s2_cdc.yaml", "s3_churn.yaml", "data_types.yaml"]
+CASE_FILES = ["s1_payment.yaml", "s2_cdc.yaml", "s3_churn.yaml", "data_types.yaml", "p1b_aggfunc_extended.yaml"]
 CASES = [c for f in CASE_FILES for c in load_cases(GOLDEN / f)]
 
 
@@ -36,11 +36,24 @@ def reference_of(case: GoldenCase) -> Reference:
         tag_events=[ev for _, ev in case.tag_events],
         value_events=[ev for _, ev in case.value_events],
         intervals=case.intervals,
+        tag_dict=case.tag_dict,
     )
+
+
+def scoped(sets: dict, scope) -> dict:
+    """Kết quả reference giới hạn theo scope đã materialize (EXTENDED)."""
+    return sets if scope is None else {t: v for t, v in sets.items() if t in scope}
 
 
 def test_golden_covers_all_kinds():
     assert {c.attr.kind for c in CASES} == set(Kind), "golden phải có đủ 4 loại, MUTEX/NOT_MUTEX cả EVENT và STATE"
+    value_cases = [c for c in CASES if c.attr.kind in (Kind.PARTIAL_VALUE, Kind.PARTIAL_VALUE_BY_TAG)]
+    assert {c.attr.agg_func for c in value_cases} == {AggFunc.SUM, AggFunc.COUNT, AggFunc.MIN, AggFunc.MAX}
+    assert {c.attr.kind for c in CASES if c.attr.is_extended} == {
+        Kind.NOT_MUTEX_EVENT,
+        Kind.NOT_MUTEX_STATE,
+        Kind.PARTIAL_VALUE_BY_TAG,
+    }
 
 
 @pytest.fixture(scope="module")
@@ -94,20 +107,28 @@ def test_case(case: GoldenCase, engines):
         w = window_of(DateRange.Value(name), case.ds)
         assert engine.blocks.window(w.l, w.r).get(ANY_TAG, BitMap()) == BitMap(users), name
 
+    if "tag_dict" in exp:
+        assert case.tag_dict.snapshot() == exp["tag_dict"]
+
+    for name, tags in exp.get("scopes", {}).items():
+        assert engine.query(DateRange.Value(name), case.ds).scope == frozenset(case.tag(t) for t in tags), name
+
     for name, tags in exp.get("ranges", {}).items():
         dr = DateRange.Value(name)
         want = as_sets(case, tags)
-        assert engine.query(dr, case.ds).tags == want, name
+        got = engine.query(dr, case.ds)
+        assert got.tags == want, name
         w = window_of(dr, case.ds)
         l = w.l if not w.always_active else case.history_start
-        assert ref.members(l, w.r) == want, f"reference {name}"
+        assert scoped(ref.members(l, w.r), got.scope) == want, f"reference {name}"
 
     for name, rows in exp.get("pv_range_value", {}).items():
         dr = DateRange.Value(name)
         want = as_sums(case, rows)
-        assert engine.query(dr, case.ds).sums == want, name
+        got = engine.query(dr, case.ds)
+        assert got.sums == want, name
         w = window_of(dr, case.ds)
-        assert ref.sums(w.l, w.r) == want, f"reference {name}"
+        assert scoped(ref.sums(w.l, w.r), got.scope) == want, f"reference {name}"
 
     for row in exp.get("custom", []):
         cr = CustomRange(parse_day(str(row["from"])), parse_day(str(row["to"])))
@@ -121,6 +142,9 @@ def test_case(case: GoldenCase, engines):
         want = BitMap(row["result"])
         assert evaluate_condition(cond, catalog, {case.attr.name: engine}, case.ds) == want, row
         assert evaluate_condition(cond, catalog, {case.attr.name: ref}, case.ds) == want, f"reference {row}"
+
+    for name, tags in exp.get("usage_after", {}).items():
+        assert engine.usage[DateRange.Value(name)] == {case.tag(t) for t in tags}, name
 
 
 def test_segments(engines):

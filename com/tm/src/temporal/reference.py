@@ -1,6 +1,7 @@
 """Reference implementation — cách tính ngây thơ đúng định nghĩa CLAUDE.md §3.2 / §3.4.
 
-Duyệt toàn bộ event trong window, lấy signal gần nhất theo `(event_ts, event_id)`, SUM. Không dùng
+Duyệt toàn bộ event trong window, lấy signal gần nhất theo `(event_ts, event_id)`, aggregate theo `aggFunc`
+(SUM / COUNT / MIN / MAX tính thẳng bằng Python, không dùng phép ⊕ của engine). Không dùng
 daily/block/LATEST. Mọi implementation tối ưu (engine, SQL P4) phải khớp với module này (§4.4).
 Chỉ dùng cho test: độ phức tạp O(#event × #window).
 """
@@ -17,10 +18,12 @@ from pyroaring import BitMap
 from com.tm.src.temporal.model import (
     ANY_TAG,
     DAY_S,
+    AggFunc,
     AttributeSpec,
     Kind,
     ModelError,
     StateInterval,
+    TagDict,
     TagEvent,
     TagSets,
     TagSums,
@@ -68,6 +71,20 @@ def _state_signals(intervals: list[StateInterval], l: int, r: int) -> list[_Sign
     return out
 
 
+def _aggregate(agg_func: int, values: list[Decimal]) -> Decimal:
+    match agg_func:
+        case AggFunc.SUM:
+            return sum(values, Decimal(0))
+        case AggFunc.COUNT:
+            return Decimal(len(values))
+        case AggFunc.MIN:
+            return min(values)
+        case AggFunc.MAX:
+            return max(values)
+        case _:
+            raise ModelError(f"unsupported agg_func {agg_func}")
+
+
 def _mutex(signals: Iterable[_Signal]) -> TagSets:
     """User ∈ t ⇔ ADD gần nhất trong window là t và không có REMOVE t sau lần ADD đó."""
     by_user: dict[int, list[_Signal]] = defaultdict(list)
@@ -106,8 +123,10 @@ class Reference:
         tag_events: Iterable[TagEvent] = (),
         value_events: Iterable[ValueEvent] = (),
         intervals: Iterable[StateInterval] = (),
+        tag_dict: TagDict | None = None,
     ):
         self.attr = attr
+        self.tag_dict = tag_dict
         self.kind = attr.kind
         tag_events, value_events, intervals = list(tag_events), list(value_events), list(intervals)
         for ev in tag_events:
@@ -145,19 +164,26 @@ class Reference:
                 return {}
 
     def sums(self, l: int, r: int) -> TagSums:
-        """SUM value trong `[l, r]` theo (tag, uidx) — user không có event thì không có mặt."""
+        """AGG value trong `[l, r]` theo (tag, uidx) — user không có event thì không có mặt."""
         match self.kind:
             case Kind.PARTIAL_VALUE | Kind.PARTIAL_VALUE_BY_TAG:
-                out: TagSums = {}
+                groups: dict[tuple[int, int], list[Decimal]] = defaultdict(list)
                 for ev in self._values:
                     if l <= ds_of_ts_ms(ev.ts_ms) <= r:
-                        m = out.setdefault(ev.tag, {})
-                        m[ev.uidx] = m.get(ev.uidx, Decimal(0)) + ev.value
+                        groups[(ev.tag, ev.uidx)].append(ev.value)
+                out: TagSums = {}
+                for (tag, uidx), values in groups.items():
+                    out.setdefault(tag, {})[uidx] = _aggregate(self.attr.agg_func, values)
                 return out
             case Kind.MUTEX_EVENT | Kind.MUTEX_STATE | Kind.NOT_MUTEX_EVENT | Kind.NOT_MUTEX_STATE:
                 raise ModelError(f"{self.kind.value} has no partial value")
 
     # ConditionSource (segment evaluator)
+    def extended_tag_id(self, tag_string: str) -> int | None:
+        if self.tag_dict is None:
+            raise ModelError(f"{self.attr.name}: not an EXTENDED attribute")
+        return self.tag_dict.lookup(tag_string)
+
     def tag_bitmap(self, ref: WindowRef, ds: int, tag_id: int) -> BitMap:
         return self.members(*self._bounds(ref, ds)).get(tag_id, BitMap())
 
