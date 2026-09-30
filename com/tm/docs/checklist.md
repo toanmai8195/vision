@@ -10,7 +10,7 @@ Quy ước:
 
 ## Bước 0 — Nền móng  ([chi tiết](phases/step-00-foundation.md))
 > Mục tiêu: có chỗ để viết code và chạy thử. Chưa có gì về nghiệp vụ.
-- [ ] Bazel 8 lõi: `.bazelversion`, `.bazelrc`, `MODULE.bazel`, `BUILD.bazel` + 1 `sh_test` mẫu (chưa cần ngôn ngữ nào)
+- [x] Bazel 8 lõi: `.bazelversion`, `.bazelrc`, `MODULE.bazel`, `BUILD.bazel` + 1 `sh_test` mẫu (chưa cần ngôn ngữ nào)
 - [ ] File `com/tm/docker/vision/docker-compose.yml` rỗng khung; **service nào cần thì bước đó mới thêm** (service nào thêm ở bước nào: `phases/step-00-foundation.md`)
 - [ ] Done khi: `bazel test //...` xanh với `sh_test` mẫu.
 
