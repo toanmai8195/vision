@@ -19,7 +19,7 @@ Quy ước:
 - [x] Bài toán kỹ thuật: phân khúc user để làm gì, vào/ra của hệ thống, ràng buộc (quy mô, SLA)
 - [x] Ví dụ cụ thể: vài segment thực tế, đi qua dữ liệu thật từng bước (dùng `data-flow-examples.md` làm khung)
 - [x] Các nguồn dữ liệu (payment, profile, churn score…): ai sinh ra, dạng event hay snapshot, ca biên (trùng, đến muộn, xoá/đổi giá trị)
-- [ ] Done khi: bạn đọc xong và đồng ý đó là bài toán cần giải.
+- [x] Done khi: bạn đọc xong và đồng ý đó là bài toán cần giải.
 
 ## Bước 2 — Seed OLTP (L0)  ([chi tiết](phases/step-02-seed-oltp.md))
 > Mục tiêu: có DB nguồn giống hệ thống thật, chứa data mẫu.
