@@ -1,0 +1,7 @@
+# Khung compose local cho vision. Chưa có service nào.
+# Mỗi bước sau chỉ thêm service nó cần (xem com/tm/docs/phases/step-00-foundation.md):
+#   2 Postgres OLTP · 3 Kafka/Debezium/Flink/MinIO/Iceberg REST · 4 Spark
+#   5 StarRocks + Postgres meta · 9 Redis · 10 Airflow/Prometheus/Grafana
+name: vision
+
+services: {}
