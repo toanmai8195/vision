@@ -14,9 +14,4 @@ daily ──▶ LATEST (MUTEX) · POS (NOT_MUTEX) · STATE (feed STATE) ──�
 - Window `[l,r]` ghép ≤ 2·log₂N block rời nhau.
 - Done bằng **property test (hypothesis)**: SQL == `reference.py`, ≤ 400 ngày, có REMOVE, late data, EVENT và STATE.
 
-## Checklist
-**Mục tiêu**: gộp nhiều ngày mà không quét lại event.
-- [ ] Dyadic block (`tag_block`, `pv_block`)
-- [ ] `LATEST` (MUTEX), `POS` (NOT_MUTEX), `STATE` + checkpoint tuần
-
-**Done khi**: property test (hypothesis) — SQL == `reference.py` với ≤ 400 ngày, có REMOVE, late data, EVENT và STATE.
+Checklist: xem mục "Bước 6" trong `../checklist.md`.

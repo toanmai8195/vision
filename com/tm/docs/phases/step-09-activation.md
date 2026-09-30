@@ -15,9 +15,4 @@ user_id ──Caffeine ▶ Redis ▶ StarRocks──▶ uidx
 - Mọi response có `version` + `asOfDs`.
 - SLO: `contains`/`count` p99 < 10ms; `segments by user` p99 < 20ms.
 
-## Checklist
-**Mục tiêu**: tra cứu segment nhanh.
-- [ ] `count`, `contains`, `users by segment`, `segments by user`
-- [ ] Segment ONLINE: mmap `.roar`, hot-swap khi có version mới; OFFLINE: fallback StarRocks
-
-**Done khi**: `contains`/`count` p99 < 10ms trên dữ liệu local.
+Checklist: xem mục "Bước 9" trong `../checklist.md`.

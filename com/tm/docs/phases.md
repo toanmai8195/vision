@@ -2,11 +2,11 @@
 
 Đi từ bài toán nghiệp vụ: biết có dữ liệu gì → đưa vào hệ thống → mới khai báo attribute theo nhu cầu.
 Quy tắc chung: mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại (MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG).
-Chi tiết thiết kế: `CLAUDE.md`. Flow dữ liệu + **checklist** (việc cần làm, tiêu chí done) nằm trong file từng bước: `phases/step-NN-*.md`. Ví dụ input/output (dùng làm golden test): `data-flow-examples.md`.
+Chi tiết thiết kế: `CLAUDE.md`. Flow dữ liệu từng bước: `phases/step-NN-*.md`. **Checklist tổng hợp (tiến độ): `checklist.md`.** Ví dụ input/output (dùng làm golden test): `data-flow-examples.md`.
 
 | Bước | Layer | Kết quả |
 |---|---|---|
-| [0](phases/step-00-foundation.md) | Nền móng | repo build được, compose khung |
+| [0](phases/step-00-foundation.md) | Nền móng | Bazel 8 chạy được, compose khung |
 | [1](phases/step-01-problem-examples.md) | L0 Bài toán + ví dụ | tài liệu: bài toán kỹ thuật, ví dụ cụ thể |
 | [2](phases/step-02-seed-oltp.md) | L0 Seed OLTP | DB nguồn (OLTP) có schema + data mẫu |
 | [3](phases/step-03-bronze.md) | L1 Bronze (OLAP) | data từ OLTP đi vào Iceberg bronze |

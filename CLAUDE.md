@@ -11,7 +11,8 @@
 > - `com/tm/docs/data-flow-examples.md` — dữ liệu qua từng layer, ví dụ input/output đầy đủ (= golden test)
 > - `com/tm/docs/capacity.md` — ước lượng quy mô, chi phí, rủi ro
 > - `com/tm/docs/phases.md` — tổng quan kế hoạch theo layer (bước 0–10)
-> - `com/tm/docs/phases/step-NN-*.md` — flow dữ liệu + **checklist** (việc cần làm, tiêu chí done) từng bước
+> - `com/tm/docs/phases/step-NN-*.md` — flow dữ liệu từng bước: input/output, công nghệ
+> - `com/tm/docs/checklist.md` — **checklist tổng hợp** mọi bước (task + tiêu chí done), nguồn theo dõi tiến độ; chạy bằng skill `/execute`
 
 ---
 
@@ -24,7 +25,7 @@
   2. `MUTEX`/`NOT_MUTEX` quy về bitmap theo ngày `ADD(d,t)`, `DEL(d,t)`; `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` quy về aggregate theo ngày (`SUM` mặc định; `COUNT`/`MIN`/`MAX`).
   3. Window = ghép **dyadic block** (A180 ≤ 11 block, tổng quát ≤ 2·log2 N). Tag theo window = `LATEST(r,t) ∩ SEEN[l,r]` → chi phí/ngày tỉ lệ **số tag**, không tỉ lệ độ dài window.
   4. Tính theo dạng dữ liệu (§3.6): nhãn cardinality thấp → **precompute bitmap** mọi tag × date range; số → aggregate theo ngày/block, **so ngưỡng lúc build segment**; tag cardinality cao (`EXTENDED`) → **chỉ tính condition đang được segment dùng** (usage-driven).
-- **Build**: Bazel 8 monorepo (layout/macro theo `/Users/toanmai/Documents/code/pandora`), Python / Go / Kotlin.
+- **Build**: Bazel 8 monorepo (cần tham khảo layout/macro → repo `/Users/toanmai/Documents/code/thor`), Python / Go / Kotlin.
 
 ---
 
@@ -32,19 +33,19 @@
 
 | Thành phần | Vai trò | Ghi chú |
 |---|---|---|
-| **Bazel 8** (bzlmod) | Build/test/image toàn repo | theo pandora |
+| **Bazel 8** (bzlmod) | Build/test/image toàn repo | tham khảo thor |
 | **Python 3.11** | Airflow DAG, PySpark, temporal planner, seed generator, DQ | rules_python + `pip.parse` |
 | **Go** | `segment-builder` | rules_go + gazelle, `RoaringBitmap/roaring/v2` |
 | **Kotlin + Vert.x + Dagger2** | `segment-manager`, `activation-api` | JVM 21, Vert.x 5 coroutines, Dagger qua `java_plugin` |
 | **Kafka** | Source event bus + domain event | *bổ sung* |
-| **Debezium + Flink SQL** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze | *bổ sung*, như pandora |
+| **Debezium + Flink SQL** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze | *bổ sung*, tham khảo thor |
 | **Spark (PySpark)** | Bronze → Silver (dedup, MERGE CDC, SCD2), backfill | *bổ sung* |
 | **Iceberg** (REST catalog) + **MinIO/S3** | bronze, silver, archive | |
 | **StarRocks 3.5.x** | Gold: tag bitmap, partial value, temporal, range, segment bitmap; đọc Iceberg qua external catalog | |
 | **StarRocks bitmap** | Kiểu tập user | uidx < 2^32 (BITMAP32) |
 | **Postgres** | Catalog attribute/tag, segment definition/version, build run; Airflow DB | *bổ sung* |
 | **Redis** | Cache `user_id ↔ uidx` cho API | *bổ sung* |
-| **Airflow 2.10.x** | Orchestration theo `ds` | như pandora; nâng cấp 3.x sau |
+| **Airflow 2.10.x** | Orchestration theo `ds` | tham khảo thor; nâng cấp 3.x sau |
 | **Prometheus + Grafana** | Metrics, dashboard, alert | cấm label cardinality cao (§10) |
 | **Protobuf** | Contract DSL/catalog/event cho Go/Kotlin/Python | |
 
@@ -287,7 +288,7 @@ Metadata Postgres `meta`: `attribute` (gồm `agg_func`, `attribute_type`), `tag
 
 ## 6. Thành phần
 
-**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → Flink SQL → `bronze.*_raw` exactly-once (như `pandora/com/tm/src/flink_ingestor`); bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
+**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → Flink SQL → `bronze.*_raw` exactly-once (tham khảo thor nếu cần); bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
 
 **Standardize (L2)** — PySpark: parse, dedup `event_id`, `ds` theo ICT, DLQ, Iceberg `MERGE` CDC → SCD2. **Dictionary** `user_id → uidx` append-only, không tái sử dụng; sync Redis + `meta.user_dict_rev(uidx, user_id)`. `UNIVERSE(ds)` = bitmap user hợp lệ. Derived attribute (vd `spend_band`) tính ở đây, đi vào như `STATE`.
 
@@ -364,9 +365,9 @@ Luật: DAG mỏng (logic ở thư viện có test) · idempotent theo `(ds, att
 
 ```
 vision/
-├── .bazelversion  .bazelrc  MODULE.bazel  BUILD.bazel     # theo pandora
+├── .bazelversion  .bazelrc  MODULE.bazel  BUILD.bazel     # tham khảo thor
 ├── go.mod (module com.tm/vision)  maven_install.json  requirements_lock.txt
-├── tools/rules/com_tm_container.bzl    # com_tm_py_image, com_tm_airflow_image (pandora) + com_tm_go_image, com_tm_kt_image
+├── tools/rules/com_tm_container.bzl    # com_tm_py_image, com_tm_airflow_image (tham khảo thor) + com_tm_go_image, com_tm_kt_image
 ├── third_party/dagger/BUILD.bazel
 └── com/tm/
     ├── proto/vision/{segment,catalog,event}/v1/
@@ -385,12 +386,12 @@ vision/
 ```
 
 **Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7`.
-- Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (như pandora) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (bước 4).
+- Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (tham khảo thor) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (bước 4).
 - JVM deps: sửa `artifacts` trong `MODULE.bazel` → `bazel run @maven//:pin` (lock `maven_install.json`, `fail_if_repin_required`).
 - Go: `gazelle:map_kind go_binary com_tm_go_image` → gazelle quản lý `go_library`/`go_test`, binary luôn qua macro image.
 - Go deps: `go_deps.from_file(go_mod="//:go.mod")`; thêm module: `go get <module>@<version>` rồi `bazel run //:gazelle`.
 - JVM artifact dự kiến thêm ở các bước sau: `vertx-mysql-client` (StarRocks), `vertx-pg-client`, `vertx-redis-client`.
-- OCI base: `python_base`, `airflow_base` (pandora), distroless static (Go), temurin 21 JRE (Kotlin).
+- OCI base: `python_base`, `airflow_base` (tham khảo thor), distroless static (Go), temurin 21 JRE (Kotlin).
 
 **Dagger2** (`third_party/dagger/BUILD.bazel`):
 ```starlark
@@ -421,7 +422,7 @@ bazel run --config=linux-amd64 //com/tm/src/segment/builder:segment_builder_dock
 docker compose -f com/tm/docker/vision/docker-compose.yml up -d
 ```
 
-**Local stack** (dựa compose pandora): **thêm dần theo bước** (`com/tm/docs/phases.md`): Postgres OLTP (bước 2) → kafka, debezium, flink, minio, iceberg-rest (3) → spark (4) → starrocks 3.5 allin1, postgres meta (5) → redis (9) → airflow, prometheus, grafana, statsd-exporter, pushgateway (10). Seed OLTP ~10K user.
+**Local stack** (dựa compose thor): **thêm dần theo bước** (`com/tm/docs/phases.md`): Postgres OLTP (bước 2) → kafka, debezium, flink, minio, iceberg-rest (3) → spark (4) → starrocks 3.5 allin1, postgres meta (5) → redis (9) → airflow, prometheus, grafana, statsd-exporter, pushgateway (10). Seed OLTP ~10K user.
 
 ---
 
@@ -476,7 +477,7 @@ Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 
 
 ## 12. Roadmap
 
-Tổng quan: `com/tm/docs/phases.md`; checklist + tiêu chí done từng bước: `com/tm/docs/phases/step-NN-*.md`. Đi từ bài toán nghiệp vụ → dữ liệu nguồn → mới khai báo attribute theo nhu cầu.
+Tổng quan: `com/tm/docs/phases.md`; checklist tổng hợp: `com/tm/docs/checklist.md`. Đi từ bài toán nghiệp vụ → dữ liệu nguồn → mới khai báo attribute theo nhu cầu.
 
 | Bước | Layer | Nội dung |
 |---|---|---|
@@ -510,4 +511,5 @@ Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại
 7. Pin version (Bazel deps, maven, image digest); không `latest` ngoài compose local.
 8. Không thêm label Prometheus cardinality cao.
 9. Điều chưa xác minh → ghi `TODO(verify)`, không đoán.
-10. Làm theo thứ tự bước (layer) trong `com/tm/docs/phases.md`; trước khi báo xong một bước, tự kiểm mục **Done khi** trong file `phases/step-NN-*.md` của bước đó và cập nhật checkbox ở đó khi hoàn thành việc.
+10. Làm theo thứ tự bước (layer) trong `com/tm/docs/phases.md`; trước khi báo xong một bước, tự kiểm mục **Done khi** trong `com/tm/docs/checklist.md` và tick checkbox ở đó khi hoàn thành việc.
+11. **Git**: xong **mỗi task** (mỗi dòng `- [ ]` trong `checklist.md`) → tick checkbox rồi tạo **1 commit** (chỉ file của task đó + `checklist.md`; message `step N: <task>`). Xong **cả phase** (mọi task + `Done khi` đã tick) → **push** branch hiện tại. Không push giữa phase, không gộp nhiều task vào một commit, không commit khi test của task chưa xanh.
