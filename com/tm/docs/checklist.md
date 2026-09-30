@@ -23,7 +23,7 @@ Quy ước:
 
 ## Bước 2 — Seed OLTP (L0)  ([chi tiết](phases/step-02-seed-oltp.md))
 > Mục tiêu: có DB nguồn giống hệ thống thật, chứa data mẫu.
-- [ ] Thêm Postgres OLTP vào compose
+- [x] Thêm Postgres OLTP vào compose
 - [ ] Python trên Bazel: rules_python + `pip.parse`, macro `com_tm_py_image` (`tools/rules/com_tm_container.bzl`), 1 test mẫu xanh
 - [ ] Schema OLTP cho từng nguồn (bảng, cột, kiểu, khoá, cột thời gian) theo bài toán ở bước 1
 - [ ] Seed data khớp ví dụ bước 1, gồm cả ca biên (trùng, đến muộn, xoá/đổi giá trị)

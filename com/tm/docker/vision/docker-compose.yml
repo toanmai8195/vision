@@ -1,7 +1,28 @@
-# Khung compose local cho vision. Chưa có service nào.
-# Mỗi bước sau chỉ thêm service nó cần (xem com/tm/docs/phases/step-00-foundation.md):
+# Compose local cho vision. Mỗi bước chỉ thêm service nó cần (xem com/tm/docs/phases/step-00-foundation.md):
 #   2 Postgres OLTP · 3 Kafka/Debezium/Flink/MinIO/Iceberg REST · 4 Spark
 #   5 StarRocks + Postgres meta · 9 Redis · 10 Airflow/Prometheus/Grafana
 name: vision
 
-services: {}
+services:
+  # Bước 2: Postgres OLTP = nguồn nghiệp vụ (L0). Tách khỏi Postgres `meta` (bước 5).
+  # wal_level=logical để Debezium đọc log ở bước 3.
+  postgres-oltp:
+    image: postgres:16.4
+    container_name: vision-postgres-oltp
+    environment:
+      POSTGRES_USER: vision
+      POSTGRES_PASSWORD: vision
+      POSTGRES_DB: oltp
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10"]
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-oltp-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vision -d oltp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-oltp-data:
