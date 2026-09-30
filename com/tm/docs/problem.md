@@ -2,6 +2,32 @@
 
 > Bước 1 (L0). Chỉ mô tả bài toán; thiết kế ở `CLAUDE.md`, con số quy mô ở `capacity.md`, ví dụ dữ liệu ở `data-flow-examples.md`.
 
+## 0. Bối cảnh hệ thống
+
+Hệ thống nguồn là **nền tảng thanh toán** (ví/app) phục vụ người dùng cuối. Vision đọc dữ liệu của nền tảng này để phân khúc user; không tham gia luồng thanh toán.
+
+| | Thực tế | Ghi chú |
+|---|---|---|
+| Số user | **~30M** | thiết kế của Vision vẫn giữ **100M** (`CLAUDE.md` §0) làm headroom; 30M nằm trong dư địa đó |
+| Giao dịch (payment event) | **~1M/ngày** (~12/giây trung bình) | nhỏ hơn giả định 10M/ngày ở `capacity.md` → ước lượng chi phí trong `capacity.md` là bảo thủ |
+| Nhịp xử lý | T+1 theo `ds` (Asia/Ho_Chi_Minh) | |
+
+### Dữ liệu raw hệ thống ghi lại
+
+| Nguồn | Nội dung raw | Dạng | Vào Vision như |
+|---|---|---|---|
+| **Payment** (OLTP) | `event_id, user_id, mcc, amount, status (SUCCESS/FAILED), event_ts` — mỗi giao dịch một dòng, insert-only | event | `NOT_MUTEX` (ngành hàng theo MCC), `PARTIAL_VALUE` (tổng tiền), `PARTIAL_VALUE_BY_TAG` (tiền theo ngành) |
+| **Profile** (OLTP, CDC) | `user_id, city_code, …` — có update/delete | snapshot/trạng thái | `MUTEX` `STATE` (city) |
+| **Product holding** (OLTP, CDC) | sản phẩm user đang dùng (paylater, bảo hiểm) — thêm/bớt | snapshot/trạng thái | `NOT_MUTEX` `STATE` |
+| **Churn score** (file ML) | `user_id, score, model_version, scored_at` — parquet theo ngày | event theo batch | `MUTEX` `EVENT` (band low/mid/high) |
+| **Voucher / quà / campaign** | mã quà, mã campaign user nhận/dùng | event | attribute `EXTENDED` (tag là chuỗi tự do, cardinality cao — `CLAUDE.md` §3.6) |
+| **Hành vi app** (click/view) | sự kiện dùng app | event | *chưa có trong thiết kế* — xem lưu ý dưới |
+
+**Lưu ý / cần chốt ở các task sau**
+- `TODO(verify)`: **Hành vi app** có khối lượng lớn hơn payment nhiều lần, schema chưa rõ (loại sự kiện, trường, số lượng/ngày). Cần chốt trước khi đưa vào bước 2; nếu đưa vào thì thuộc loại dữ liệu nào (nhiều khả năng `NOT_MUTEX` theo màn hình, `PARTIAL_VALUE(_BY_TAG)` với `COUNT`) và `attributeType` nào. Chưa đổi `CLAUDE.md`; đổi thì theo §13.4.
+- `TODO(verify)`: schema chi tiết Voucher/campaign (trường, ai sinh, dạng OLTP hay file).
+- Ví dụ mẫu `data-flow-examples.md` mới có payment, profile, product, churn score.
+
 ## 1. Phân khúc user để làm gì
 
 Nghiệp vụ cần chia người dùng thành **segment** theo hành vi và thuộc tính (vd "chi F&B ≥ 500K trong 7 ngày, ở Hà Nội, không có nguy cơ rời bỏ cao") rồi dùng segment đó cho:
@@ -22,7 +48,7 @@ Nghiệp vụ cần chia người dùng thành **segment** theo hành vi và thu
 ## 3. Vào / ra của hệ thống
 
 **Vào**
-- Dữ liệu nguồn ở OLTP: sự kiện thanh toán (payment), trạng thái hồ sơ (profile, product), điểm rời bỏ từ file ML (churn score).
+- Dữ liệu nguồn ở OLTP: sự kiện thanh toán (payment), trạng thái hồ sơ (profile, product), điểm rời bỏ từ file ML (churn score); dự kiến thêm voucher/campaign và hành vi app (§0).
 - Định nghĩa segment (DSL): điều kiện trên attribute + tag + date range (+ `valueRange` với dữ liệu số) + lịch build.
 
 **Ra**
@@ -33,7 +59,7 @@ Nghiệp vụ cần chia người dùng thành **segment** theo hành vi và thu
 
 ## 4. Ràng buộc
 
-**Quy mô** (thiết kế, chưa đo): 100M user · 500 attribute · 500–1000 tag/attribute (≤ 500K tag) · mọi date range mỗi ngày · 5K segment/ngày · lịch sử 400 ngày.
+**Quy mô** (thiết kế, chưa đo; thực tế ~30M user, ~1M giao dịch/ngày — xem §0): 100M user · 500 attribute · 500–1000 tag/attribute (≤ 500K tag) · mọi date range mỗi ngày · 5K segment/ngày · lịch sử 400 ngày.
 
 **Thời gian & độ tươi**
 - Pipeline chạy **T+1** theo `ds` (Asia/Ho_Chi_Minh). Không realtime trong ngày (`A0` ngoài phạm vi v1).
