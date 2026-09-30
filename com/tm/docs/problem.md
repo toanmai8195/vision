@@ -20,13 +20,10 @@ Hệ thống nguồn là **nền tảng thanh toán** (ví/app) phục vụ ngư
 | **Profile** (OLTP, CDC) | `user_id, city_code, …` — có update/delete | snapshot/trạng thái | `MUTEX` `STATE` (city) |
 | **Product holding** (OLTP, CDC) | sản phẩm user đang dùng (paylater, bảo hiểm) — thêm/bớt | snapshot/trạng thái | `NOT_MUTEX` `STATE` |
 | **Churn score** (file ML) | `user_id, score, model_version, scored_at` — parquet theo ngày | event theo batch | `MUTEX` `EVENT` (band low/mid/high) |
-| **Voucher / quà / campaign** | mã quà, mã campaign user nhận/dùng | event | attribute `EXTENDED` (tag là chuỗi tự do, cardinality cao — `CLAUDE.md` §3.6) |
-| **Hành vi app** (click/view) | sự kiện dùng app | event | *chưa có trong thiết kế* — xem lưu ý dưới |
+| **Voucher / quà / OA** (đề xuất, §7) | `voucher_grant`: mã quà + giá trị; `oa_follow`: follow/unfollow OA | event | attribute `EXTENDED` (tag là chuỗi tự do, cardinality cao — `CLAUDE.md` §3.6) |
+| **Hành vi app** (đề xuất, §7) | `app_event`: `event_name`, `event_ts` | event | attribute `EXTENDED` (`NOT_MUTEX`, `PARTIAL_VALUE_BY_TAG` với `COUNT`) |
 
-**Lưu ý / cần chốt ở các task sau**
-- `TODO(verify)`: **Hành vi app** có khối lượng lớn hơn payment nhiều lần, schema chưa rõ (loại sự kiện, trường, số lượng/ngày). Cần chốt trước khi đưa vào bước 2; nếu đưa vào thì thuộc loại dữ liệu nào (nhiều khả năng `NOT_MUTEX` theo màn hình, `PARTIAL_VALUE(_BY_TAG)` với `COUNT`) và `attributeType` nào. Chưa đổi `CLAUDE.md`; đổi thì theo §13.4.
-- `TODO(verify)`: schema chi tiết Voucher/campaign (trường, ai sinh, dạng OLTP hay file).
-- Ví dụ mẫu `data-flow-examples.md` mới có payment, profile, product, churn score.
+**Lưu ý:** S4 (voucher/OA) và S5 (hành vi app) là **đề xuất** dùng đúng loại dữ liệu đã có, chưa cần đổi `CLAUDE.md` — chi tiết và ghi chú khối lượng ở §7. Ví dụ mẫu `data-flow-examples.md` mới có payment, profile, product, churn score và ví dụ EXTENDED (`gift_value`, `oa_follow`).
 
 ## 1. Phân khúc user để làm gì
 
@@ -100,8 +97,8 @@ Ví dụ dữ liệu cụ thể: `data-flow-examples.md` §1–§4. Cột "Ai si
 | **S2a Profile** | dịch vụ hồ sơ; bảng `user_profile` có update/delete | **snapshot (trạng thái)** | `user_id` · thời điểm CDC `ts_ms` | MUTEX `STATE` (city) | CDC → bronze → SCD2 |
 | **S2b Product holding** | dịch vụ sản phẩm; thêm/đóng sản phẩm | **snapshot (trạng thái)** | `(user_id, product)` · thời điểm CDC | NOT_MUTEX `STATE` | CDC → bronze → SCD2 |
 | **S3 Churn score** | job ML batch hằng ngày, ghi parquet `dt=<ds>` | **event theo batch** (mỗi dòng = một lần chấm) | `user_id` · `scored_at` | MUTEX `EVENT` (band low/mid/high) | file loader (sensor `_SUCCESS`) → bronze |
-| **S4 Voucher/quà/campaign** | chưa xác định | event (dự kiến) | chưa rõ | EXTENDED (`NOT_MUTEX`, `PARTIAL_VALUE_BY_TAG`) | chưa rõ — `TODO(verify)` |
-| **S5 Hành vi app** | chưa xác định | event (dự kiến) | chưa rõ | chưa có trong thiết kế — `TODO(verify)` | chưa rõ |
+| **S4 Voucher/quà/OA** *(đề xuất)* | dịch vụ khuyến mãi (`voucher_grant`: mỗi lần tặng/dùng quà) và dịch vụ OA (`oa_follow`: follow/unfollow) ghi vào OLTP, insert-only | **event** | `event_id` · `event_ts`; tag = `voucher_code`, `oa_code` (chuỗi tự do) | EXTENDED: `PARTIAL_VALUE_BY_TAG` (giá trị quà theo mã), `NOT_MUTEX` (follow OA, có REMOVE khi unfollow) | CDC → Kafka → Flink → bronze (như S1) |
+| **S5 Hành vi app** *(đề xuất)* | app/collector ghi vào OLTP `app_event`, insert-only | **event** | `event_id` · `event_ts`; tag = `event_name` (vd `view_promo`, `open_screen_x`) | EXTENDED: `PARTIAL_VALUE_BY_TAG` với `COUNT` (số lần/ngành tính năng), `NOT_MUTEX` (đã có hành vi X trong window) | CDC → Kafka → Flink → bronze (như S1) |
 
 ### Ca biên phải xử lý (mỗi ca có trong ví dụ/golden)
 
@@ -112,7 +109,6 @@ Ví dụ dữ liệu cụ thể: `data-flow-examples.md` §1–§4. Cột "Ai si
 | S1 | `event_ts` UTC nhưng ngày nghiệp vụ theo **ICT** (lệch ngày) | `ds` = ngày theo Asia/Ho_Chi_Minh | `e-9003` §1 |
 | S1 | giao dịch **FAILED** | không vào tag/số tiền (chỉ `SUCCESS`) | `e-9004` §1 |
 | S1 | một user **nhiều tag cùng ngày** | hợp lệ với NOT_MUTEX | U1001 §1 |
-| S1 | hoàn tiền / huỷ giao dịch | `TODO(verify)`: chưa có trong thiết kế, cần chốt có thành event âm/REMOVE hay không | — |
 | S2a | **đổi giá trị** (city HCM → HN) | version cũ đóng (`REMOVED`), version mới mở (`ADDED`) | U1001 §2.1 |
 | S2a | **user mới** | cấp `uidx` mới, `ADDED` | U1002 §2.1 |
 | S2a | user **không đổi** từ lâu | vẫn thuộc tag ở mọi window (đó là lý do dùng `STATE`) | U1003 §2.1 |
@@ -122,6 +118,14 @@ Ví dụ dữ liệu cụ thể: `data-flow-examples.md` §1–§4. Cột "Ai si
 | S3 | user **đổi band** giữa các ngày | ADD band mới xoá band cũ (MUTEX, không quay lại tag cũ) | U1001 §3 |
 | S3 | **REMOVE** sau ADD | không thuộc tag nào | X, Y, Z §4 |
 | S3 | file ngày `dt=<ds>` **chạy lại** | silver ghi idempotent theo `ds` | — |
+| S4 | **unfollow** OA | signal REMOVE cho tag `oa_code`; window lấy signal gần nhất (NOT_MUTEX) | §7.2 |
+| S4 | user nhận quà nhiều lần cùng mã trong window | AGG theo `aggFunc` của attribute (vd `SUM`) | §7.3 |
+| S5 | **khối lượng lớn** hơn payment nhiều lần | xem ghi chú dưới bảng | — |
 | Chung | tag/giá trị mới xuất hiện ở nguồn EXTENDED | cấp `tag_id` mới trong `tag_dict`, chưa có trong dictionary → bitmap rỗng | §7.2 |
 
-`TODO(verify)`: S4, S5 và hoàn tiền ở trên cần chốt (xem §0) trước khi dựng seed OLTP ở bước 2.
+**Ghi chú S4/S5 (đề xuất, chờ bạn xác nhận ở `Done khi`):**
+- Đi cùng đường CDC như payment để giữ một cách ingest duy nhất; không ghi song song OLAP (`CLAUDE.md` §6).
+- Không cần đổi thiết kế: tất cả dùng loại dữ liệu và `EXTENDED` đã có (S4 khớp `gift_value`, `oa_follow` ở `data-flow-examples.md` §7). S5 dùng `COUNT` (§3.2.1).
+- S5 ở seed bước 2 chỉ cần vài loại `event_name` với ít dòng. `TODO(verify)`: nếu thực tế mỗi user sinh hàng chục sự kiện/ngày (hàng trăm triệu dòng/ngày), cân nhắc app/collector gộp theo `(user, event_name, ngày)` trước khi vào OLTP rồi dùng `SUM` trên số lần — quyết khi có số đo, không ảnh hưởng bước 2.
+- Hoàn tiền/huỷ giao dịch: ngoài phạm vi v1.
+- Cột "Ai sinh ra" giữ ở mức vai trò hệ thống, chưa gắn tên team/dịch vụ thật.
