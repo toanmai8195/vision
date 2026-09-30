@@ -77,3 +77,15 @@ Nghiệp vụ cần chia người dùng thành **segment** theo hành vi và thu
 
 ## 5. Ngoài phạm vi v1
 Realtime trong ngày (`A0`) · `AVG` / `DISTINCT_COUNT` / `FIRST` / `LAST` cho partial value · `EXTENDED` với MUTEX.
+
+## 6. Ví dụ segment cụ thể
+
+Ba segment minh hoạ; dữ liệu qua từng layer (L0 → L7) và kết quả bitmap ở `data-flow-examples.md` §1–§7 (golden test). As-of `ds = 2026-09-15`, 4 user `U1001..U1004`. Mục đích nghiệp vụ dưới đây chỉ để minh hoạ.
+
+| Segment | Ý nghĩa nghiệp vụ | Rule | Loại dữ liệu dùng | Kết quả |
+|---|---|---|---|---|
+| `seg_1001` | Kéo lại user có nguy cơ rời bỏ ở HN chưa mua F&B gần đây → gửi ưu đãi F&B | `(churn mid/high A30 ∩ city hn A7) − F&B A7` | MUTEX `EVENT` (churn), MUTEX `STATE` (city), NOT_MUTEX `EVENT` (ngành hàng) | `{3}` |
+| `seg_1002` | User chi tiêu lớn 7 ngày → chăm sóc VIP / đo tác động | `SUM amount A7 ≥ 1M` ∪ `SUM F&B A7 ≥ 500K` | PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG | `{1,2}` |
+| `seg_1003` | Nhận quà ≥ 100K nhưng chưa follow OA cụ thể → nhắc follow | `SUM gift A7 ≥ 100K − follow oa_12345 A7` | PARTIAL_VALUE_BY_TAG `EXTENDED`, NOT_MUTEX `EXTENDED` | `{1}` |
+
+Ba ví dụ này chạm đủ 4 loại dữ liệu, cả `EVENT`/`STATE` và `STANDARD`/`EXTENDED`. Ca biên đi kèm (trùng `event_id`, đến muộn, ngày ICT ≠ UTC, REMOVE trong MUTEX) ở `data-flow-examples.md` §1, §4. Ca biên theo từng nguồn sẽ chốt ở task tiếp theo.
