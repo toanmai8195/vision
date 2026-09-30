@@ -10,12 +10,10 @@ Quy ước:
 
 ## Bước 0 — Nền móng  ([chi tiết](phases/step-00-foundation.md))
 > Mục tiêu: có chỗ để viết code và chạy thử. Chưa có gì về nghiệp vụ.
-- [ ] Bazel 8 lõi: `.bazelversion`, `.bazelrc`, `MODULE.bazel`, `BUILD.bazel` + Python (rules_python) với 1 test mẫu xanh
-- [ ] Go: rules_go + gazelle, `go.mod`, 1 test mẫu xanh
-- [ ] Kotlin: rules_kotlin + `maven_install.json` + Dagger (`third_party/dagger`), 1 test mẫu xanh
-- [ ] Macro image `tools/rules/com_tm_container.bzl`: `com_tm_py_image`, `com_tm_go_image`, `com_tm_kt_image` (chỉ cần build được target, không cần chạy image)
+- [ ] Bazel 8 lõi: `.bazelversion`, `.bazelrc`, `MODULE.bazel`, `BUILD.bazel` + 1 `sh_test` mẫu (chưa cần ngôn ngữ nào)
 - [ ] File `com/tm/docker/vision/docker-compose.yml` rỗng khung; **service nào cần thì bước đó mới thêm** (service nào thêm ở bước nào: `phases/step-00-foundation.md`)
-- [ ] Done khi: `bazel test //...` xanh với test mẫu của cả Python, Go, Kotlin; `bazel build` được target image của mỗi ngôn ngữ.
+- [ ] Done khi: `bazel test //...` xanh với `sh_test` mẫu.
+
 ## Bước 1 — Bài toán + ví dụ (L0)  ([chi tiết](phases/step-01-problem-examples.md))
 > Mục tiêu: chốt bài toán trước khi đụng công nghệ. Chỉ viết tài liệu, chưa có code, chưa tạo attribute.
 - [ ] Bài toán kỹ thuật: phân khúc user để làm gì, vào/ra của hệ thống, ràng buộc (quy mô, SLA)
@@ -26,6 +24,7 @@ Quy ước:
 ## Bước 2 — Seed OLTP (L0)  ([chi tiết](phases/step-02-seed-oltp.md))
 > Mục tiêu: có DB nguồn giống hệ thống thật, chứa data mẫu.
 - [ ] Thêm Postgres OLTP vào compose
+- [ ] Python trên Bazel: rules_python + `pip.parse`, macro `com_tm_py_image` (`tools/rules/com_tm_container.bzl`), 1 test mẫu xanh
 - [ ] Schema OLTP cho từng nguồn (bảng, cột, kiểu, khoá, cột thời gian) theo bài toán ở bước 1
 - [ ] Seed data khớp ví dụ bước 1, gồm cả ca biên (trùng, đến muộn, xoá/đổi giá trị)
 - [ ] Script seed chạy lại được; có cách sinh thêm data để test lớn hơn
@@ -71,6 +70,7 @@ Quy ước:
 
 ## Bước 8 — Segment (L6)  ([chi tiết](phases/step-08-segment.md))
 > Mục tiêu: từ DSL ra bitmap segment.
+- [ ] Go + Kotlin trên Bazel: rules_go + gazelle + `go.mod`; rules_kotlin + `maven_install.json` + Dagger; macro `com_tm_go_image`, `com_tm_kt_image`; mỗi ngôn ngữ 1 test mẫu xanh
 - [ ] Proto `segment` (DSL)
 - [ ] Bitmap codec (Go + Kotlin), golden bytes lấy từ StarRocks thật
 - [ ] `segment-manager` (Kotlin): CRUD, validate DSL, estimate

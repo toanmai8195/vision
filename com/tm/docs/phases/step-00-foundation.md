@@ -5,14 +5,15 @@
 | | Nội dung |
 |---|---|
 | **Input** | Version pin ở `CLAUDE.md` §8; cần tham khảo layout/macro Bazel thì xem repo `thor` (`/Users/toanmai/Documents/code/thor`) |
-| **Output** | Bazel 8 build/test được Go · Kotlin · Python; macro image `com_tm_{py,go,kt}_image`; `docker-compose.yml` rỗng khung |
+| **Output** | Bazel 8 chạy được (`bazel test //...` với `sh_test` mẫu); `docker-compose.yml` rỗng khung. Chưa có ngôn ngữ nào |
 
 ```
-MODULE.bazel + BUILD.bazel ──Bazel 8──▶ binary ──rules_oci──▶ image  (com.tm.<lang>.<name>:v1.0.0)
+MODULE.bazel + BUILD.bazel ──Bazel 8──▶ sh_test mẫu xanh
 docker-compose.yml (khung) ◀── mỗi bước sau chỉ thêm service nó cần
 ```
 
-- Công nghệ: Bazel 8 (bzlmod), rules_go + gazelle, rules_kotlin, rules_python, rules_oci. Version pin ở `CLAUDE.md` §8.
+- Công nghệ: chỉ Bazel 8 (bzlmod). Version pin ở `CLAUDE.md` §8.
+- Ngôn ngữ thêm khi có code thật dùng: Python + macro `com_tm_py_image` ở bước 2 (seed generator); Go, Kotlin + macro image ở bước 8.
 - Không dựng Kafka, Spark, StarRocks… ở đây; xem bảng "Service thêm dần" trong `../phases.md`.
 
 ## Service thêm dần theo bước

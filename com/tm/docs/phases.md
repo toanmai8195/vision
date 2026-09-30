@@ -6,7 +6,7 @@ Chi tiết thiết kế: `CLAUDE.md`. Flow dữ liệu từng bước: `phases/s
 
 | Bước | Layer | Kết quả |
 |---|---|---|
-| [0](phases/step-00-foundation.md) | Nền móng | repo build được, compose khung |
+| [0](phases/step-00-foundation.md) | Nền móng | Bazel 8 chạy được, compose khung |
 | [1](phases/step-01-problem-examples.md) | L0 Bài toán + ví dụ | tài liệu: bài toán kỹ thuật, ví dụ cụ thể |
 | [2](phases/step-02-seed-oltp.md) | L0 Seed OLTP | DB nguồn (OLTP) có schema + data mẫu |
 | [3](phases/step-03-bronze.md) | L1 Bronze (OLAP) | data từ OLTP đi vào Iceberg bronze |
