@@ -12,7 +12,7 @@ Quy ước:
 > Mục tiêu: có chỗ để viết code và chạy thử. Chưa có gì về nghiệp vụ.
 - [x] Bazel 8 lõi: `.bazelversion`, `.bazelrc`, `MODULE.bazel`, `BUILD.bazel` + 1 `sh_test` mẫu (chưa cần ngôn ngữ nào)
 - [x] File `com/tm/docker/vision/docker-compose.yml` rỗng khung; **service nào cần thì bước đó mới thêm** (service nào thêm ở bước nào: `phases/step-00-foundation.md`)
-- [ ] Done khi: `bazel test //...` xanh với `sh_test` mẫu.
+- [x] Done khi: `bazel test //...` xanh với `sh_test` mẫu.
 
 ## Bước 1 — Bài toán + ví dụ (L0)  ([chi tiết](phases/step-01-problem-examples.md))
 > Mục tiêu: chốt bài toán trước khi đụng công nghệ. Chỉ viết tài liệu, chưa có code, chưa tạo attribute.
