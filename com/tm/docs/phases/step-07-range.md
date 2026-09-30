@@ -16,11 +16,4 @@ custom range    : on-demand + cache
 - Ngưỡng `valueRange` luôn so lúc build, không precompute.
 - Done: mọi range khớp `reference.py`; MUTEX rời nhau trong mỗi window.
 
-## Checklist
-**Mục tiêu**: có sẵn kết quả cho mọi date range (A1…A180, IN_MONTH, LAST_MONTH, ALWAYS_ACTIVE).
-- [ ] `tag_range_bitmap` (nhãn và bucket)
-- [ ] `pv_range_value` (số, lọc `valueRange` lúc build)
-- [ ] EXTENDED: chỉ tính tag đang được segment dùng (usage-driven)
-- [ ] Custom date range: tính on-demand + cache
-
-**Done khi**: mọi range khớp `reference.py`; MUTEX rời nhau trong mỗi window.
+Checklist: xem mục "Bước 7" trong `../checklist.md`.

@@ -2,7 +2,7 @@
 
 Đi từ bài toán nghiệp vụ: biết có dữ liệu gì → đưa vào hệ thống → mới khai báo attribute theo nhu cầu.
 Quy tắc chung: mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại (MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG).
-Chi tiết thiết kế: `CLAUDE.md`. Flow dữ liệu + **checklist** (việc cần làm, tiêu chí done) nằm trong file từng bước: `phases/step-NN-*.md`. Ví dụ input/output (dùng làm golden test): `data-flow-examples.md`.
+Chi tiết thiết kế: `CLAUDE.md`. Flow dữ liệu từng bước: `phases/step-NN-*.md`. **Checklist tổng hợp (tiến độ): `checklist.md`.** Ví dụ input/output (dùng làm golden test): `data-flow-examples.md`.
 
 | Bước | Layer | Kết quả |
 |---|---|---|

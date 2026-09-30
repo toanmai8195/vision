@@ -15,10 +15,4 @@ bronze ──Spark──▶ dedup event_id ──▶ ds theo ICT ──▶ CDC�
 - `uidx` số nguyên dày, chỉ append, không tái sử dụng.
 - Idempotent: chạy lại cùng `ds` ra cùng kết quả. Late data ≤ 3 ngày tự reprocess.
 
-## Checklist
-**Mục tiêu**: dữ liệu sạch, user có `uidx`.
-- [ ] Spark: dedup `event_id`, tính `ds` theo ICT, dòng lỗi vào DLQ
-- [ ] CDC → SCD2 (profile, product)
-- [ ] Dictionary `user_id → uidx` (chỉ append, không tái sử dụng)
-
-**Done khi**: chạy lại cùng `ds` ra cùng kết quả (idempotent); khớp `data-flow-examples.md`.
+Checklist: xem mục "Bước 4" trong `../checklist.md`.

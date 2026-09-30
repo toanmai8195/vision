@@ -11,7 +11,8 @@
 > - `com/tm/docs/data-flow-examples.md` — dữ liệu qua từng layer, ví dụ input/output đầy đủ (= golden test)
 > - `com/tm/docs/capacity.md` — ước lượng quy mô, chi phí, rủi ro
 > - `com/tm/docs/phases.md` — tổng quan kế hoạch theo layer (bước 0–10)
-> - `com/tm/docs/phases/step-NN-*.md` — flow dữ liệu + **checklist** (việc cần làm, tiêu chí done) từng bước
+> - `com/tm/docs/phases/step-NN-*.md` — flow dữ liệu từng bước: input/output, công nghệ
+> - `com/tm/docs/checklist.md` — **checklist tổng hợp** mọi bước (task + tiêu chí done), nguồn theo dõi tiến độ; chạy bằng skill `/execute`
 
 ---
 
@@ -476,7 +477,7 @@ Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 
 
 ## 12. Roadmap
 
-Tổng quan: `com/tm/docs/phases.md`; checklist + tiêu chí done từng bước: `com/tm/docs/phases/step-NN-*.md`. Đi từ bài toán nghiệp vụ → dữ liệu nguồn → mới khai báo attribute theo nhu cầu.
+Tổng quan: `com/tm/docs/phases.md`; checklist tổng hợp: `com/tm/docs/checklist.md`. Đi từ bài toán nghiệp vụ → dữ liệu nguồn → mới khai báo attribute theo nhu cầu.
 
 | Bước | Layer | Nội dung |
 |---|---|---|
@@ -510,4 +511,5 @@ Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại
 7. Pin version (Bazel deps, maven, image digest); không `latest` ngoài compose local.
 8. Không thêm label Prometheus cardinality cao.
 9. Điều chưa xác minh → ghi `TODO(verify)`, không đoán.
-10. Làm theo thứ tự bước (layer) trong `com/tm/docs/phases.md`; trước khi báo xong một bước, tự kiểm mục **Done khi** trong file `phases/step-NN-*.md` của bước đó và cập nhật checkbox ở đó khi hoàn thành việc.
+10. Làm theo thứ tự bước (layer) trong `com/tm/docs/phases.md`; trước khi báo xong một bước, tự kiểm mục **Done khi** trong `com/tm/docs/checklist.md` và tick checkbox ở đó khi hoàn thành việc.
+11. **Git**: xong **mỗi task** (mỗi dòng `- [ ]` trong `checklist.md`) → tick checkbox rồi tạo **1 commit** (chỉ file của task đó + `checklist.md`; message `step N: <task>`). Xong **cả phase** (mọi task + `Done khi` đã tick) → **push** branch hiện tại. Không push giữa phase, không gộp nhiều task vào một commit, không commit khi test của task chưa xanh.
