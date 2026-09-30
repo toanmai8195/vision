@@ -28,3 +28,7 @@ vendor/
 
 # Local env
 .env
+
+# IDE classpath dumps
+kls-classpath
+tools/ide/

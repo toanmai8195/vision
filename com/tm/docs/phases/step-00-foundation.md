@@ -4,7 +4,7 @@
 
 | | Nội dung |
 |---|---|
-| **Input** | Layout/macro Bazel của repo `pandora` |
+| **Input** | Version pin ở `CLAUDE.md` §8; cần tham khảo layout/macro Bazel thì xem repo `thor` (`/Users/toanmai/Documents/code/thor`) |
 | **Output** | Bazel 8 build/test được Go · Kotlin · Python; macro image `com_tm_{py,go,kt}_image`; `docker-compose.yml` rỗng khung |
 
 ```

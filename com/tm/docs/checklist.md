@@ -10,9 +10,12 @@ Quy ước:
 
 ## Bước 0 — Nền móng  ([chi tiết](phases/step-00-foundation.md))
 > Mục tiêu: có chỗ để viết code và chạy thử. Chưa có gì về nghiệp vụ.
-- [ ] Bazel 8 + macro build image (Go / Kotlin / Python)
-- [ ] File `docker-compose.yml` rỗng khung; **service nào cần thì bước đó mới thêm** (service nào thêm ở bước nào: `phases/step-00-foundation.md`)
-- [ ] Done khi: `bazel test //...` xanh với một test mẫu.
+- [ ] Bazel 8 lõi: `.bazelversion`, `.bazelrc`, `MODULE.bazel`, `BUILD.bazel` + Python (rules_python) với 1 test mẫu xanh
+- [ ] Go: rules_go + gazelle, `go.mod`, 1 test mẫu xanh
+- [ ] Kotlin: rules_kotlin + `maven_install.json` + Dagger (`third_party/dagger`), 1 test mẫu xanh
+- [ ] Macro image `tools/rules/com_tm_container.bzl`: `com_tm_py_image`, `com_tm_go_image`, `com_tm_kt_image` (chỉ cần build được target, không cần chạy image)
+- [ ] File `com/tm/docker/vision/docker-compose.yml` rỗng khung; **service nào cần thì bước đó mới thêm** (service nào thêm ở bước nào: `phases/step-00-foundation.md`)
+- [ ] Done khi: `bazel test //...` xanh với test mẫu của cả Python, Go, Kotlin; `bazel build` được target image của mỗi ngôn ngữ.
 ## Bước 1 — Bài toán + ví dụ (L0)  ([chi tiết](phases/step-01-problem-examples.md))
 > Mục tiêu: chốt bài toán trước khi đụng công nghệ. Chỉ viết tài liệu, chưa có code, chưa tạo attribute.
 - [ ] Bài toán kỹ thuật: phân khúc user để làm gì, vào/ra của hệ thống, ràng buộc (quy mô, SLA)
