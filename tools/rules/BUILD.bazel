@@ -1,3 +1,0 @@
-# tools/rules — macro Bazel dùng chung
-
-exports_files(["com_tm_container.bzl"])

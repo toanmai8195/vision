@@ -10,8 +10,8 @@
 > - `com/tm/docs/data-types.md` — giải thích trực quan 4 loại dữ liệu, ví dụ timeline, cách chọn loại cho attribute mới
 > - `com/tm/docs/data-flow-examples.md` — dữ liệu qua từng layer, ví dụ input/output đầy đủ (= golden test)
 > - `com/tm/docs/capacity.md` — ước lượng quy mô, chi phí, rủi ro
-> - `com/tm/docs/phases.md` — kế hoạch triển khai P0–P8, việc cần làm + tiêu chí done từng phase
-> - `com/tm/docs/phases/pX-*.md` — flow dữ liệu chi tiết từng phase: input/output, từng bước, công nghệ, dữ liệu biến đổi ra sao
+> - `com/tm/docs/phases.md` — tổng quan kế hoạch theo layer (bước 0–10)
+> - `com/tm/docs/phases/step-NN-*.md` — flow dữ liệu + **checklist** (việc cần làm, tiêu chí done) từng bước
 
 ---
 
@@ -33,11 +33,11 @@
 | Thành phần | Vai trò | Ghi chú |
 |---|---|---|
 | **Bazel 8** (bzlmod) | Build/test/image toàn repo | theo pandora |
-| **Python 3.11** | Airflow DAG, PySpark, temporal planner, simulator, DQ | rules_python + `pip.parse` |
-| **Go** | `event-collector` (HTTP→Kafka), `segment-builder` | rules_go + gazelle, `RoaringBitmap/roaring/v2` |
+| **Python 3.11** | Airflow DAG, PySpark, temporal planner, seed generator, DQ | rules_python + `pip.parse` |
+| **Go** | `segment-builder` | rules_go + gazelle, `RoaringBitmap/roaring/v2` |
 | **Kotlin + Vert.x + Dagger2** | `segment-manager`, `activation-api` | JVM 21, Vert.x 5 coroutines, Dagger qua `java_plugin` |
 | **Kafka** | Source event bus + domain event | *bổ sung* |
-| **Flink SQL** | Kafka → Iceberg bronze | *bổ sung*, như pandora |
+| **Debezium + Flink SQL** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze | *bổ sung*, như pandora |
 | **Spark (PySpark)** | Bronze → Silver (dedup, MERGE CDC, SCD2), backfill | *bổ sung* |
 | **Iceberg** (REST catalog) + **MinIO/S3** | bronze, silver, archive | |
 | **StarRocks 3.5.x** | Gold: tag bitmap, partial value, temporal, range, segment bitmap; đọc Iceberg qua external catalog | |
@@ -54,9 +54,9 @@
 
 ```
 L0 SOURCE        L1 INGESTION       L2 STANDARDIZE       L3 DAILY             L4 TEMPORAL          L5 RANGE              L6 SEGMENT             L7 ACTIVATION
-S1 payment evt → collector/Kafka  → Spark: dedup, ds,  → StarRocks:         → planner(Py)→SQL:   → tag_range_bitmap    → segment-builder(Go) → activation-api
-S2 profile CDC → Flink→Iceberg    →  SCD2, uidx dict   →  tag_daily (ADD/DEL)→  blocks, LATEST,    →  pv_range_value      →  DSL→bitmap, cache  →  (Kotlin/Vert.x)
-S3 ML score    → Spark file load  →  silver (Iceberg)  →  pv_daily (AGG)     →  STATE checkpoint   →  (mọi supported      →  S3 snapshot, Kafka →  mmap roaring
+S1 payment (OLTP)→ CDC→Kafka→Flink   → Spark: dedup, ds,  → StarRocks:         → planner(Py)→SQL:   → tag_range_bitmap    → segment-builder(Go) → activation-api
+S2 profile (OLTP)→ Iceberg bronze      →  SCD2, uidx dict   →  tag_daily (ADD/DEL)→  blocks, LATEST,    →  pv_range_value      →  DSL→bitmap, cache  →  (Kotlin/Vert.x)
+S3 ML score file→ Spark file load  →  silver (Iceberg)  →  pv_daily (AGG)     →  STATE checkpoint   →  (mọi supported      →  S3 snapshot, Kafka →  mmap roaring
                   bronze (raw)                                                                         date range)
 Cross-cutting: Postgres catalog · Airflow (theo ds) · DQ invariants · Prometheus/Grafana
 ```
@@ -194,7 +194,6 @@ Hệ quả `STATE`: với **mọi** window kết thúc ở `r`, kết quả = `S
 - `EXTENDED`: `tag_string` chưa có trong `silver.tag_dict` → bitmap rỗng (không lỗi). Giới hạn "500–1000 tag/attribute" (§0) **không** áp dụng cho EXTENDED; quy mô tính theo số tag được dùng.
 - Tương đương cách core-service hiện tại xử lý attribute EXTENDED / PARTIAL_VALUE (task on-demand theo `tagConditionId`), nhưng vision precompute thêm `pv_range_value` để nhiều segment dùng chung.
 
-**Trạng thái cài đặt**: P1b đã cài `SUM`/`COUNT`/`MIN`/`MAX` và `EXTENDED` trong thư viện thuần (`com/tm/src/temporal/`, `com/tm/src/segment/dsl/`); SQL tương ứng làm ở P3–P5.
 
 ---
 
@@ -288,7 +287,7 @@ Metadata Postgres `meta`: `attribute` (gồm `agg_func`, `attribute_type`), `tag
 
 ## 6. Thành phần
 
-**Ingestion (L1)** — `event-collector` (Go): HTTP/gRPC → validate proto → Kafka (key `user_id`). Flink SQL: Kafka → `bronze.*_raw` exactly-once (như `pandora/com/tm/src/flink_ingestor`). File loader (PySpark) có sensor `_SUCCESS`. Simulator (Python) sinh 3 source, tham số `--users --days --attrs`.
+**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → Flink SQL → `bronze.*_raw` exactly-once (như `pandora/com/tm/src/flink_ingestor`); bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
 
 **Standardize (L2)** — PySpark: parse, dedup `event_id`, `ds` theo ICT, DLQ, Iceberg `MERGE` CDC → SCD2. **Dictionary** `user_id → uidx` append-only, không tái sử dụng; sync Redis + `meta.user_dict_rev(uidx, user_id)`. `UNIVERSE(ds)` = bitmap user hợp lệ. Derived attribute (vd `spend_band`) tính ở đây, đi vào như `STATE`.
 
@@ -372,7 +371,7 @@ vision/
 └── com/tm/
     ├── proto/vision/{segment,catalog,event}/v1/
     ├── src/
-    │   ├── ingest/{collector(Go),flink(SQL),simulator(Py)}/
+    │   ├── ingest/{oltp(seed+DDL),cdc(debezium,flink SQL),loader(Py)}/
     │   ├── batch/{silver,dictionary}/            # PySpark
     │   ├── sql/starrocks/{ddl,daily,dq}/
     │   ├── temporal/                             # model, blocks, latest, ranges, planner, engine, reference, testdata/golden
@@ -385,12 +384,12 @@ vision/
     └── docs/{data-types.md,data-flow-examples.md,capacity.md,phases.md}
 ```
 
-**Version đã pin (P0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7`.
-- Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (như pandora) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (P2).
+**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7`.
+- Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (như pandora) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (bước 4).
 - JVM deps: sửa `artifacts` trong `MODULE.bazel` → `bazel run @maven//:pin` (lock `maven_install.json`, `fail_if_repin_required`).
 - Go: `gazelle:map_kind go_binary com_tm_go_image` → gazelle quản lý `go_library`/`go_test`, binary luôn qua macro image.
 - Go deps: `go_deps.from_file(go_mod="//:go.mod")`; thêm module: `go get <module>@<version>` rồi `bazel run //:gazelle`.
-- JVM artifact dự kiến thêm ở phase sau: `vertx-mysql-client` (StarRocks), `vertx-pg-client`, `vertx-redis-client`.
+- JVM artifact dự kiến thêm ở các bước sau: `vertx-mysql-client` (StarRocks), `vertx-pg-client`, `vertx-redis-client`.
 - OCI base: `python_base`, `airflow_base` (pandora), distroless static (Go), temurin 21 JRE (Kotlin).
 
 **Dagger2** (`third_party/dagger/BUILD.bazel`):
@@ -422,7 +421,7 @@ bazel run --config=linux-amd64 //com/tm/src/segment/builder:segment_builder_dock
 docker compose -f com/tm/docker/vision/docker-compose.yml up -d
 ```
 
-**Local stack** (dựa compose pandora): kafka, flink, minio, iceberg-rest, spark, starrocks 3.5 allin1, postgres, airflow, redis, prometheus, grafana, statsd-exporter, pushgateway + service vision. Simulator ~10K user.
+**Local stack** (dựa compose pandora): **thêm dần theo bước** (`com/tm/docs/phases.md`): Postgres OLTP (bước 2) → kafka, debezium, flink, minio, iceberg-rest (3) → spark (4) → starrocks 3.5 allin1, postgres meta (5) → redis (9) → airflow, prometheus, grafana, statsd-exporter, pushgateway (10). Seed OLTP ~10K user.
 
 ---
 
@@ -477,22 +476,23 @@ Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 
 
 ## 12. Roadmap
 
-Chi tiết việc cần làm + tiêu chí done: `com/tm/docs/phases.md`.
+Tổng quan: `com/tm/docs/phases.md`; checklist + tiêu chí done từng bước: `com/tm/docs/phases/step-NN-*.md`. Đi từ bài toán nghiệp vụ → dữ liệu nguồn → mới khai báo attribute theo nhu cầu.
 
-| Phase | Nội dung | Phụ thuộc |
+| Bước | Layer | Nội dung |
 |---|---|---|
-| P0 | Foundation: Bazel 8, image macro, proto, catalog, compose local | — |
-| P1 | Semantics core: reference + model + block + latest + range + evaluator thuần, golden & property test | P0 |
-| P1b | Mở rộng semantics: `aggFunc` COUNT/MIN/MAX + `attributeType` EXTENDED (usage-driven) trong model/reference/DSL + golden & property test | P1 |
-| P2 | Ingestion & Silver: simulator, collector, Flink, Spark, dictionary (`uidx`, `tag_dict`) | P0 |
-| P3 | Daily layer L3 (StarRocks) + DQ cơ bản | P2 |
-| P4 | Temporal & Range L4–L5 + DAG temporal/late/backfill | P1b, P3 |
-| P5 | Segment: codec, segment-manager, segment-builder, publish | P4 |
-| P6 | Activation API | P5 |
-| P7 | Observability: metrics, dashboard, alert | P2+ (làm dần) |
-| P8 | Scale & hardening: 100M user / 500 attr / 5K segment, tối ưu PARTIAL_VALUE, runbook | P6, P7 |
+| 0 | Nền móng | Bazel 8, compose local |
+| 1 | L0 | bài toán kỹ thuật + ví dụ (tài liệu) |
+| 2 | L0 | seed OLTP: schema + data mẫu của các nguồn |
+| 3 | L1 | ingest OLTP → bronze (OLAP, Iceberg) |
+| 4 | L2 | Spark silver, dictionary `uidx` |
+| 5 | L3 | nhu cầu attribute + catalog, reference, SQL `tag_daily` / `pv_daily` |
+| 6 | L4 | block, LATEST/POS/STATE, checkpoint |
+| 7 | L5 | `tag_range_bitmap`, `pv_range_value`, custom range |
+| 8 | L6 | proto segment, codec, segment-manager, segment-builder |
+| 9 | L7 | activation-api |
+| 10 | Vận hành | DQ, Airflow, metrics, scale (làm dần từ bước 5) |
 
-Mọi phase đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại.
+Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại.
 
 ---
 
@@ -510,4 +510,4 @@ Mọi phase đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại.
 7. Pin version (Bazel deps, maven, image digest); không `latest` ngoài compose local.
 8. Không thêm label Prometheus cardinality cao.
 9. Điều chưa xác minh → ghi `TODO(verify)`, không đoán.
-10. Làm theo thứ tự phase trong `com/tm/docs/phases.md`; trước khi báo xong một phase, tự kiểm từng mục **Done khi**. Cập nhật checkbox trong `phases.md` khi hoàn thành việc.
+10. Làm theo thứ tự bước (layer) trong `com/tm/docs/phases.md`; trước khi báo xong một bước, tự kiểm mục **Done khi** trong file `phases/step-NN-*.md` của bước đó và cập nhật checkbox ở đó khi hoàn thành việc.
