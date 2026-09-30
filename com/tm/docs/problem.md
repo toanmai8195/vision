@@ -89,3 +89,39 @@ Ba segment minh hoạ; dữ liệu qua từng layer (L0 → L7) và kết quả 
 | `seg_1003` | Nhận quà ≥ 100K nhưng chưa follow OA cụ thể → nhắc follow | `SUM gift A7 ≥ 100K − follow oa_12345 A7` | PARTIAL_VALUE_BY_TAG `EXTENDED`, NOT_MUTEX `EXTENDED` | `{1}` |
 
 Ba ví dụ này chạm đủ 4 loại dữ liệu, cả `EVENT`/`STATE` và `STANDARD`/`EXTENDED`. Ca biên đi kèm (trùng `event_id`, đến muộn, ngày ICT ≠ UTC, REMOVE trong MUTEX) ở `data-flow-examples.md` §1, §4. Ca biên theo từng nguồn sẽ chốt ở task tiếp theo.
+
+## 7. Nguồn dữ liệu và ca biên
+
+Ví dụ dữ liệu cụ thể: `data-flow-examples.md` §1–§4. Cột "Ai sinh ra" là vai trò hệ thống, chưa gắn tên team/dịch vụ thật.
+
+| Nguồn | Ai sinh ra | Dạng | Khoá / thời gian | Vào Vision | Đường vào (L1) |
+|---|---|---|---|---|---|
+| **S1 Payment** | dịch vụ thanh toán ghi vào OLTP (insert-only) | **event** | `event_id` · `event_ts` (UTC) | NOT_MUTEX, PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG (`EVENT`) | CDC → Kafka → Flink → bronze |
+| **S2a Profile** | dịch vụ hồ sơ; bảng `user_profile` có update/delete | **snapshot (trạng thái)** | `user_id` · thời điểm CDC `ts_ms` | MUTEX `STATE` (city) | CDC → bronze → SCD2 |
+| **S2b Product holding** | dịch vụ sản phẩm; thêm/đóng sản phẩm | **snapshot (trạng thái)** | `(user_id, product)` · thời điểm CDC | NOT_MUTEX `STATE` | CDC → bronze → SCD2 |
+| **S3 Churn score** | job ML batch hằng ngày, ghi parquet `dt=<ds>` | **event theo batch** (mỗi dòng = một lần chấm) | `user_id` · `scored_at` | MUTEX `EVENT` (band low/mid/high) | file loader (sensor `_SUCCESS`) → bronze |
+| **S4 Voucher/quà/campaign** | chưa xác định | event (dự kiến) | chưa rõ | EXTENDED (`NOT_MUTEX`, `PARTIAL_VALUE_BY_TAG`) | chưa rõ — `TODO(verify)` |
+| **S5 Hành vi app** | chưa xác định | event (dự kiến) | chưa rõ | chưa có trong thiết kế — `TODO(verify)` | chưa rõ |
+
+### Ca biên phải xử lý (mỗi ca có trong ví dụ/golden)
+
+| Nguồn | Ca biên | Xử lý dự kiến | Ví dụ |
+|---|---|---|---|
+| S1 | giao dịch **giao trùng** (at-least-once) cùng `event_id` | dedup `event_id` ở silver | `e-9001` §1 |
+| S1 | **đến muộn** (`event_ts` cũ hơn ngày đang xử lý) | tính lại `ds` cũ; ≤ 3 ngày tự reprocess, hơn → backfill | `e-9005` §1 |
+| S1 | `event_ts` UTC nhưng ngày nghiệp vụ theo **ICT** (lệch ngày) | `ds` = ngày theo Asia/Ho_Chi_Minh | `e-9003` §1 |
+| S1 | giao dịch **FAILED** | không vào tag/số tiền (chỉ `SUCCESS`) | `e-9004` §1 |
+| S1 | một user **nhiều tag cùng ngày** | hợp lệ với NOT_MUTEX | U1001 §1 |
+| S1 | hoàn tiền / huỷ giao dịch | `TODO(verify)`: chưa có trong thiết kế, cần chốt có thành event âm/REMOVE hay không | — |
+| S2a | **đổi giá trị** (city HCM → HN) | version cũ đóng (`REMOVED`), version mới mở (`ADDED`) | U1001 §2.1 |
+| S2a | **user mới** | cấp `uidx` mới, `ADDED` | U1002 §2.1 |
+| S2a | user **không đổi** từ lâu | vẫn thuộc tag ở mọi window (đó là lý do dùng `STATE`) | U1003 §2.1 |
+| S2a | **xoá** giá trị (mất city) | `REMOVED`, không tag nào | quy tắc §3.4 `CLAUDE.md` |
+| S2b | **đóng** sản phẩm nhưng còn sản phẩm khác | chỉ tag đó `REMOVED`, tag khác giữ (NOT_MUTEX) | U1001 §2.2 |
+| S3 | model **chỉ chấm một phần user** mỗi ngày | user không được chấm ngày đó không có signal; window lấy lần chấm gần nhất | §3 |
+| S3 | user **đổi band** giữa các ngày | ADD band mới xoá band cũ (MUTEX, không quay lại tag cũ) | U1001 §3 |
+| S3 | **REMOVE** sau ADD | không thuộc tag nào | X, Y, Z §4 |
+| S3 | file ngày `dt=<ds>` **chạy lại** | silver ghi idempotent theo `ds` | — |
+| Chung | tag/giá trị mới xuất hiện ở nguồn EXTENDED | cấp `tag_id` mới trong `tag_dict`, chưa có trong dictionary → bitmap rỗng | §7.2 |
+
+`TODO(verify)`: S4, S5 và hoàn tiền ở trên cần chốt (xem §0) trước khi dựng seed OLTP ở bước 2.
