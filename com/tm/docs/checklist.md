@@ -27,7 +27,7 @@ Quy ước:
 - [x] Python trên Bazel: rules_python + `pip.parse`, macro `com_tm_py_image` (`tools/rules/com_tm_container.bzl`), 1 test mẫu xanh
 - [x] Schema OLTP cho từng nguồn (bảng, cột, kiểu, khoá, cột thời gian) theo bài toán ở bước 1
 - [x] Seed data khớp ví dụ bước 1, gồm cả ca biên (trùng, đến muộn, xoá/đổi giá trị)
-- [ ] Script seed chạy lại được; có cách sinh thêm data để test lớn hơn
+- [x] Script seed chạy lại được; có cách sinh thêm data để test lớn hơn
 - [ ] Done khi: query OLTP ra đúng data của ví dụ ở bước 1.
 
 ## Bước 3 — Bronze (L1, OLAP)  ([chi tiết](phases/step-03-bronze.md))

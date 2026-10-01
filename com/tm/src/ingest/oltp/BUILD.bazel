@@ -1,0 +1,32 @@
+load("@pypi//:requirements.bzl", "requirement")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/rules:com_tm_container.bzl", "com_tm_py_image")
+
+exports_files([
+    "schema.sql",
+    "seed_examples.sql",
+    "churn_score_examples.csv",
+    "seed.sh",
+])
+
+py_library(
+    name = "generate_lib",
+    srcs = ["generate.py"],
+    visibility = ["//visibility:public"],
+)
+
+com_tm_py_image(
+    name = "generate",
+    srcs = ["generate.py"],
+    main = "generate.py",
+)
+
+py_test(
+    name = "generate_test",
+    srcs = ["generate_test.py"],
+    main = "generate_test.py",
+    deps = [
+        ":generate_lib",
+        requirement("pytest"),
+    ],
+)
