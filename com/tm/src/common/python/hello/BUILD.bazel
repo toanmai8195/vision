@@ -1,0 +1,25 @@
+load("@pypi//:requirements.bzl", "requirement")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/rules:com_tm_container.bzl", "com_tm_py_image")
+
+py_library(
+    name = "hello_lib",
+    srcs = ["hello.py"],
+    visibility = ["//visibility:public"],
+)
+
+com_tm_py_image(
+    name = "hello",
+    srcs = ["hello.py"],
+    main = "hello.py",
+)
+
+py_test(
+    name = "hello_test",
+    srcs = ["hello_test.py"],
+    main = "hello_test.py",
+    deps = [
+        ":hello_lib",
+        requirement("pytest"),
+    ],
+)

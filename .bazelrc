@@ -1,3 +1,13 @@
 common --enable_bzlmod
 test --test_output=errors
 try-import %workspace%/.bazelrc.user
+
+# rules_oci: CopyToDirectory / CopyFile không chạy được trong darwin-sandbox
+build --strategy=CopyToDirectory=local
+build --strategy=CopyFile=local
+build --repo_env=DOCKER_CONFIG=/dev/null
+
+# Image đúng kiến trúc máy chạy container:
+#   bazel run --config=linux-arm64 <target>_docker   (Mac Apple Silicon)
+build:linux-amd64 --platforms=//:linux_amd64
+build:linux-arm64 --platforms=//:linux_arm64
