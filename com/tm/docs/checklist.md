@@ -33,7 +33,7 @@ Quy ước:
 ## Bước 3 — Bronze (L1, OLAP)  ([chi tiết](phases/step-03-bronze.md))
 > Mục tiêu: data từ OLTP đi vào Iceberg bronze, chưa làm sạch. Ghi OLTP trước, ingest sang OLAP (không ghi song song).
 - [x] Thêm Kafka, Debezium, Flink, MinIO + Iceberg REST vào compose
-- [ ] CDC: Debezium đọc log OLTP → Kafka → Flink SQL → `bronze.*_raw` (Iceberg), giữ bản ghi gốc + thời điểm thay đổi + loại thao tác
+- [x] CDC: Debezium đọc log OLTP → Kafka → Flink SQL → `bronze.*_raw` (Iceberg), giữ bản ghi gốc + thời điểm thay đổi + loại thao tác
 - [ ] Bảng event (payment) và bảng trạng thái (profile, product) đều qua CDC; churn score (file) qua file loader
 - [ ] Insert/update/delete ở OLTP sau đó đều xuất hiện trong bronze
 - [ ] Done khi: số bản ghi và nội dung bronze khớp OLTP, kể cả sau khi sửa/xoá.

@@ -153,7 +153,7 @@ services:
     ports: ["8181:8181"]
     environment:
       CATALOG_WAREHOUSE: s3://vision-warehouse/
-      CATALOG_URI: jdbc:sqlite:file:/home/iceberg/iceberg_catalog.db
+      CATALOG_URI: jdbc:sqlite:file:/home/iceberg/iceberg_catalog.db?journal_mode=WAL&busy_timeout=30000
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
@@ -168,15 +168,17 @@ services:
       timeout: 5s
       retries: 30
 
-  # Flink 1.20 session cluster (UI http://localhost:8081). Connector Kafka/Iceberg + job SQL thêm ở task CDC.
+  # Flink 1.20 session cluster (UI http://localhost:8081). Image build từ ./flink (có jar Kafka/Iceberg/Hadoop).
   flink-jobmanager:
-    image: flink:1.20.2-scala_2.12-java17
+    build: ./flink
+    image: vision/flink:1.20.2-iceberg1.9.2
     container_name: vision-flink-jobmanager
     command: jobmanager
     ports: ["8081:8081"]
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8081/overview >/dev/null"]
       interval: 5s
@@ -184,7 +186,8 @@ services:
       retries: 30
 
   flink-taskmanager:
-    image: flink:1.20.2-scala_2.12-java17
+    build: ./flink
+    image: vision/flink:1.20.2-iceberg1.9.2
     container_name: vision-flink-taskmanager
     command: taskmanager
     depends_on:
@@ -193,6 +196,51 @@ services:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
+
+  # One-shot: tạo sẵn topic CDC (Flink source không chịu topic chưa tồn tại, kể cả khi bảng nguồn còn rỗng).
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: vision-kafka-init
+    depends_on:
+      kafka: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for t in payment_event user_profile user_product voucher_grant oa_follow app_event; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic vision.src.$$t.v1 --partitions 3 --replication-factor 1
+        done
+
+  # One-shot: đăng ký connector Debezium (OLTP -> Kafka), idempotent.
+  debezium-register:
+    image: quay.io/debezium/connect:2.7.3.Final
+    container_name: vision-debezium-register
+    depends_on:
+      debezium: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+    restart: "no"
+    volumes:
+      - ../../src/ingest/cdc:/cdc:ro
+    entrypoint: ["bash", "/cdc/debezium/register.sh"]
+
+  # One-shot: nộp job Flink SQL bronze_ingest (Kafka -> Iceberg bronze). Bỏ qua nếu job đang chạy.
+  flink-sql-submit:
+    image: vision/flink:1.20.2-iceberg1.9.2
+    container_name: vision-flink-sql-submit
+    depends_on:
+      flink-jobmanager: { condition: service_healthy }
+      flink-taskmanager: { condition: service_started }
+      iceberg-rest: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+    restart: "no"
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
+    volumes:
+      - ../../src/ingest/cdc:/cdc:ro
+    entrypoint: ["bash", "/cdc/flink/submit.sh"]
 
 volumes:
   postgres-oltp-data:
