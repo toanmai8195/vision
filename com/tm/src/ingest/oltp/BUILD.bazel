@@ -13,12 +13,21 @@ py_library(
     name = "generate_lib",
     srcs = ["generate.py"],
     visibility = ["//visibility:public"],
+    deps = [
+        requirement("psycopg"),
+        requirement("psycopg-binary"),
+    ],
 )
 
+# TODO(verify): image chưa cài pip dependency (psycopg); cần layer site-packages trước khi chạy image này.
 com_tm_py_image(
     name = "generate",
     srcs = ["generate.py"],
     main = "generate.py",
+    deps = [
+        requirement("psycopg"),
+        requirement("psycopg-binary"),
+    ],
 )
 
 py_test(
