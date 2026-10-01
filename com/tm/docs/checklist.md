@@ -28,7 +28,7 @@ Quy ước:
 - [x] Schema OLTP cho từng nguồn (bảng, cột, kiểu, khoá, cột thời gian) theo bài toán ở bước 1
 - [x] Seed data khớp ví dụ bước 1, gồm cả ca biên (trùng, đến muộn, xoá/đổi giá trị)
 - [x] Script seed chạy lại được; có cách sinh thêm data để test lớn hơn
-- [ ] Done khi: query OLTP ra đúng data của ví dụ ở bước 1.
+- [x] Done khi: query OLTP ra đúng data của ví dụ ở bước 1.
 
 ## Bước 3 — Bronze (L1, OLAP)  ([chi tiết](phases/step-03-bronze.md))
 > Mục tiêu: data từ OLTP đi vào Iceberg bronze, chưa làm sạch. Ghi OLTP trước, ingest sang OLAP (không ghi song song).
