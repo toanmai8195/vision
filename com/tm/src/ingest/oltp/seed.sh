@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Seed Postgres OLTP, chạy lại bao nhiêu lần cũng được (xem header từng file SQL).
+# Seed Postgres OLTP bằng tay từ máy host (trong compose đã có service oltp-seed / oltp-generate, xem init_seed.sh).
+# Chạy lại bao nhiêu lần cũng được (xem header từng file SQL).
 #
 #   seed.sh                         schema + data ví dụ golden (seed_examples.sql)
 #   seed.sh --users 10000 --days 30 thêm data sinh ra: generate.py ghi thẳng vào Postgres (mọi tham số của nó)

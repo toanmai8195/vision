@@ -1,5 +1,5 @@
 # Compose local cho vision. Mỗi bước chỉ thêm service nó cần (xem com/tm/docs/phases/step-00-foundation.md):
-#   2 Postgres OLTP · 3 Kafka/Debezium/Flink/MinIO/Iceberg REST · 4 Spark
+#   2 Postgres OLTP + oltp-seed (+ oltp-generate, profile bigseed) · 3 Kafka/Debezium/Flink/MinIO/Iceberg REST · 4 Spark
 #   5 StarRocks + Postgres meta · 9 Redis · 10 Airflow/Prometheus/Grafana
 name: vision
 
@@ -23,6 +23,43 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  # Bước 2: one-shot, áp schema + nạp data ví dụ golden (chỉ khi chưa có). Chạy xong thoát (Exit 0 là bình thường).
+  # Nạp lại: FORCE_SEED=1 docker compose -f <file> up oltp-seed
+  oltp-seed:
+    image: postgres:16.4
+    container_name: vision-oltp-seed
+    depends_on:
+      postgres-oltp:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGHOST: postgres-oltp
+      PGUSER: vision
+      PGPASSWORD: vision
+      PGDATABASE: oltp
+      FORCE_SEED: ${FORCE_SEED:-0}
+    volumes:
+      - ../../src/ingest/oltp:/seed:ro
+    entrypoint: ["bash", "/seed/init_seed.sh"]
+
+  # Bước 2: sinh thêm data lớn để test, KHÔNG chạy mặc định (profile bigseed). Ví dụ:
+  #   GENERATE_ARGS="--users 10000 --days 30" docker compose -f <file> --profile bigseed up oltp-generate
+  # Cài psycopg lúc container start (chưa có layer site-packages dựng sẵn, xem TODO(verify) ở CLAUDE.md §8).
+  oltp-generate:
+    image: python:3.11-slim
+    container_name: vision-oltp-generate
+    profiles: ["bigseed"]
+    depends_on:
+      oltp-seed:
+        condition: service_completed_successfully
+    restart: "no"
+    environment:
+      VISION_OLTP_DSN: postgresql://vision:vision@postgres-oltp:5432/oltp
+      GENERATE_ARGS: ${GENERATE_ARGS:---users 1000 --days 30}
+    volumes:
+      - ../../src/ingest/oltp:/seed:ro
+    entrypoint: ["bash", "-c", "pip install -q --disable-pip-version-check 'psycopg[binary]==3.2.9' && python /seed/generate.py $$GENERATE_ARGS"]
 
 volumes:
   postgres-oltp-data:

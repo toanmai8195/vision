@@ -15,4 +15,9 @@ schema.sql ──▶ Postgres OLTP ◀── seed script (data ví dụ + ca bi�
 - Seed có cả ca biên: trùng, đến muộn, xoá/đổi giá trị. Script chạy lại được.
 - Phân biệt với Postgres `meta` (catalog) — dựng ở bước 5.
 
+Chạy seed bằng compose (`com/tm/docker/vision/docker-compose.yml`):
+- `docker compose up -d` → service one-shot `oltp-seed` áp `schema.sql` và nạp data ví dụ **nếu chưa có** (tránh sự kiện CDC giả khi chạy lại ở bước 3). Nạp lại: `FORCE_SEED=1 docker compose up oltp-seed`.
+- Data lớn: `GENERATE_ARGS="--users 10000 --days 30" docker compose --profile bigseed up oltp-generate`.
+- `src/ingest/oltp/seed.sh` vẫn dùng được để chạy tay (từ máy host, cần Bazel cho phần generator).
+
 Checklist: xem mục "Bước 2" trong `../checklist.md`.
