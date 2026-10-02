@@ -3,6 +3,8 @@
 > Giải thích trực quan cho `CLAUDE.md` §3.2. Định nghĩa hình thức và công thức ở `CLAUDE.md` §3–§4.
 > Mọi ví dụ tính tại **15/09**: A1 = 15/09 · A7 = 09/09→15/09 · A30 = 17/08→15/09.
 
+> Phạm vi triển khai hiện tại chỉ có `MUTEX` + `STATE` (`user_city`); tài liệu này mô tả đủ 4 loại để thiết kế không phải đổi khi mở rộng.
+
 Cả bốn loại cùng trả lời một câu hỏi: **user X có thuộc tag T trong khoảng ngày W không?**
 Khác nhau ở **dữ liệu đưa vào** và **cách gom dữ liệu trong khoảng ngày**.
 

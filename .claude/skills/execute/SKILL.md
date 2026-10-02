@@ -15,7 +15,7 @@ Mỗi lần gọi = **1 task**. Không làm nhiều task một lượt.
 2. **Nạp ngữ cảnh**: `CLAUDE.md` (luật §13, các mục liên quan), `com/tm/docs/phases/step-0N-*.md` của phase đó, và docs liên quan (`data-types.md`, `data-flow-examples.md`) nếu task đụng dữ liệu.
 3. **Báo user** ngắn: "Task: <nội dung> (Bước N)". Nếu task mơ hồ hoặc cần quyết định của user (vd bước 1, chọn thiết kế) → hỏi, **không tự suy diễn**, không tick.
 4. **Thực hiện** đúng phạm vi task đó, không làm lan sang task khác.
-   - Đụng dữ liệu → xử lý đủ 4 loại (MUTEX, NOT_MUTEX, PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG), theo §13.
+   - Đụng dữ liệu → xử lý các loại trong phạm vi hiện tại (xem đầu `CLAUDE.md`, mục "Mở rộng" của checklist; đích cuối đủ 4 loại), theo §13.
    - Thêm service vào compose chỉ khi phase này cần (xem `phases/step-00-foundation.md`).
 5. **Kiểm chứng**: chạy test/lệnh phù hợp (`bazel test` cho package bị ảnh hưởng, `docker compose ... ps`, query kiểm tra…). Chưa xanh/chưa chạy được → sửa, hoặc báo user; **không tick, không commit**.
 6. **Tick** `- [x]` cho task trong `checklist.md`.

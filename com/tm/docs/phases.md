@@ -1,7 +1,9 @@
 # Kế hoạch triển khai — theo từng layer
 
 Đi từ bài toán nghiệp vụ: biết có dữ liệu gì → đưa vào hệ thống → mới khai báo attribute theo nhu cầu.
-Quy tắc chung: mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại (MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG).
+**Phạm vi hiện tại (tối giản):** chỉ 1 nguồn — S2a `user_profile` → attribute `user_city` (`MUTEX`, `STATE`). Làm xong cả luồng bước 3→9 với nguồn này, rồi mới mở rộng lần lượt: S1 payment (`NOT_MUTEX` → `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`) → S2b product (`NOT_MUTEX` `STATE`) → S3 churn (`MUTEX` `EVENT`) → S4/S5 (`EXTENDED`). Danh sách ở mục "Mở rộng" của `checklist.md`.
+
+Đích cuối: đủ 4 loại (MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG). Mỗi lần mở rộng, bước đã làm phải chạy đúng thêm loại mới.
 Chi tiết thiết kế: `CLAUDE.md`. Flow dữ liệu từng bước: `phases/step-NN-*.md`. **Checklist tổng hợp (tiến độ): `checklist.md`.** Ví dụ input/output (dùng làm golden test): `data-flow-examples.md`.
 
 | Bước | Layer | Kết quả |

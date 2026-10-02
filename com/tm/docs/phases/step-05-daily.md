@@ -14,6 +14,7 @@ reference.py (ngây thơ, đúng §3.2) ◀── chuẩn so sánh
 - Thêm **StarRocks** và **Postgres `meta`** vào compose.
 - Bắt đầu từ nhu cầu: mỗi attribute trả lời câu hỏi nào → chọn loại (xem `data-types.md`) → mới seed catalog.
 - SQL theo template theo `attrGroupId`; tag rule ở catalog, không hard-code.
-- Cả 4 loại, `aggFunc` SUM/COUNT/MIN/MAX, STANDARD/EXTENDED. Kết quả phải khớp `reference.py`.
+- Hiện chỉ attribute `user_city` (`MUTEX`, `STATE`): `ADDED`/`REMOVED`/`STATE`. Thiết kế `reference.py` và SQL template **sẵn chỗ** cho 4 loại, `aggFunc`, STANDARD/EXTENDED, nhánh chưa làm báo lỗi tường minh (`CLAUDE.md` §11).
+- Kết quả phải khớp `reference.py`.
 
 Checklist: xem mục "Bước 5" trong `../checklist.md`.

@@ -218,6 +218,8 @@ Có dữ liệu ở §3, nghiệp vụ muốn chia người dùng thành **segme
 
 ## 5. Ví dụ segment cụ thể
 
+**Segment đầu tiên (phạm vi hiện tại):** `seg_0001` — "user đang ở HN" = `user_city hn A7` → `{1,3}`, chỉ cần nguồn `user_profile` (`data-flow-examples.md` §0.1). Ba segment dưới là đích cuối, cần thêm nguồn.
+
 Ba segment minh hoạ; dữ liệu qua từng layer (L0 → L7) và kết quả bitmap ở `data-flow-examples.md` §1–§7 (golden test). As-of `ds = 2026-09-15`, 4 user `U1001..U1004`. Mục đích nghiệp vụ dưới đây chỉ để minh hoạ.
 
 | Segment | Ý nghĩa nghiệp vụ | Rule | Loại dữ liệu dùng | Kết quả |
@@ -226,7 +228,7 @@ Ba segment minh hoạ; dữ liệu qua từng layer (L0 → L7) và kết quả 
 | `seg_1002` | User chi tiêu lớn 7 ngày → chăm sóc VIP / đo tác động | `SUM amount A7 ≥ 1M` ∪ `SUM F&B A7 ≥ 500K` | PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG | `{1,2}` |
 | `seg_1003` | Nhận quà ≥ 100K nhưng chưa follow OA cụ thể → nhắc follow | `SUM gift A7 ≥ 100K − follow oa_12345 A7` | PARTIAL_VALUE_BY_TAG `EXTENDED`, NOT_MUTEX `EXTENDED` | `{1}` |
 
-Ba ví dụ này chạm đủ 4 loại dữ liệu, cả `EVENT`/`STATE` và `STANDARD`/`EXTENDED`. Ca biên đi kèm (trùng `event_id`, đến muộn, ngày ICT ≠ UTC, REMOVE trong MUTEX) ở `data-flow-examples.md` §1, §4.
+Ba ví dụ này (đích cuối) chạm đủ 4 loại dữ liệu, cả `EVENT`/`STATE` và `STANDARD`/`EXTENDED`. Ca biên đi kèm (trùng `event_id`, đến muộn, ngày ICT ≠ UTC, REMOVE trong MUTEX) ở `data-flow-examples.md` §1, §4.
 
 ---
 
@@ -240,7 +242,7 @@ Ba ví dụ này chạm đủ 4 loại dữ liệu, cả `EVENT`/`STATE` và `ST
 - Với mỗi segment: tập user (bitmap) theo **version**, kèm `asOfDs`.
 - API: `count`, `users`, `contains`, `segments by user`, export async.
 
-**Bốn loại dữ liệu** hệ thống phải xử lý: `MUTEX`, `NOT_MUTEX`, `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG` (`CLAUDE.md` §3.2).
+**Bốn loại dữ liệu** hệ thống phải xử lý (đích cuối; hiện làm trước `MUTEX` `STATE`): `MUTEX`, `NOT_MUTEX`, `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG` (`CLAUDE.md` §3.2).
 
 ---
 

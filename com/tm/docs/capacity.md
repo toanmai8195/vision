@@ -1,6 +1,6 @@
 # Capacity & scale — ước lượng
 
-> Đây là ước lượng để chọn thiết kế, **chưa phải số đo**. Phase P6 phải benchmark và thay bảng này bằng số thật.
+> Ước lượng cho **đích cuối** (đủ nguồn/loại); giai đoạn 1 nguồn `user_profile` nhỏ hơn nhiều. Đây là ước lượng để chọn thiết kế, **chưa phải số đo**. Phase P6 phải benchmark và thay bảng này bằng số thật.
 > Định nghĩa thuật toán ở `CLAUDE.md` §4.
 
 ## 1. Giả định

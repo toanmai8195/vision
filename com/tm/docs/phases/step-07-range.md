@@ -15,5 +15,6 @@ custom range    : on-demand + cache
 - Range: A1…A180, IN_MONTH, LAST_MONTH, ALWAYS_ACTIVE (incremental).
 - Ngưỡng `valueRange` luôn so lúc build, không precompute.
 - Done: mọi range khớp `reference.py`; MUTEX rời nhau trong mỗi window.
+- Hiện chỉ `tag_range_bitmap` cho `user_city` (mọi window kết thúc ở `ds` = `STATE(ds)`); `pv_range_value`, usage-driven làm khi mở rộng.
 
 Checklist: xem mục "Bước 7" trong `../checklist.md`.

@@ -49,17 +49,17 @@ Quy ước:
 ## Bước 5 — Daily (L3)  ([chi tiết](phases/step-05-daily.md))
 > Mục tiêu: từ nhu cầu nghiệp vụ, khai báo attribute rồi rút gọn event thành trạng thái theo ngày.
 - [ ] Nhu cầu tạo attribute: mỗi attribute trả lời câu hỏi nghiệp vụ nào, chọn `dataType` / `feedMode` / `aggFunc` ra sao (hướng dẫn chọn: `data-types.md`)
-- [ ] Catalog Postgres `meta.*` + proto `catalog`; seed attribute theo nhu cầu vừa chốt (đủ 4 loại)
+- [ ] Catalog Postgres `meta.*` + proto `catalog`; seed attribute theo nhu cầu vừa chốt (hiện chỉ `user_city` MUTEX `STATE`)
 - [ ] `reference.py`: cách tính ngây thơ đúng §3.2, làm chuẩn so sánh cho các bước sau
 - [ ] SQL `tag_daily` (`ADD/DEL`) và `pv_daily` (`SUM/COUNT/MIN/MAX`); `tag_dict` cho EXTENDED
 - [ ] Ghi idempotent theo `(ds, attr_id)`
-- [ ] Done khi: kết quả SQL khớp `reference.py` trên golden, cả 4 loại.
+- [ ] Done khi: kết quả SQL khớp `reference.py` trên golden của `user_city` (§2.1); nhánh chưa làm báo lỗi tường minh.
 
 ## Bước 6 — Temporal (L4)  ([chi tiết](phases/step-06-temporal.md))
 > Mục tiêu: gộp nhiều ngày mà không quét lại event.
 - [ ] Dyadic block (`tag_block`, `pv_block`)
 - [ ] `LATEST` (MUTEX), `POS` (NOT_MUTEX), `STATE` + checkpoint tuần
-- [ ] Done khi: property test (hypothesis) — SQL == `reference.py` với ≤ 400 ngày, có REMOVE, late data, EVENT và STATE.
+- [ ] Done khi: property test (hypothesis) — SQL == `reference.py` với ≤ 400 ngày, có REMOVE, late data, cho nhánh `STATE` (EVENT và các loại khác khi mở rộng).
 
 ## Bước 7 — Range (L5)  ([chi tiết](phases/step-07-range.md))
 > Mục tiêu: có sẵn kết quả cho mọi date range (A1…A180, IN_MONTH, LAST_MONTH, ALWAYS_ACTIVE).
@@ -67,7 +67,7 @@ Quy ước:
 - [ ] `pv_range_value` (số, lọc `valueRange` lúc build)
 - [ ] EXTENDED: chỉ tính tag đang được segment dùng (usage-driven)
 - [ ] Custom date range: tính on-demand + cache
-- [ ] Done khi: mọi range khớp `reference.py`; MUTEX rời nhau trong mỗi window.
+- [ ] Done khi: mọi range của `user_city` khớp `reference.py`; các tag MUTEX rời nhau trong mỗi window.
 
 ## Bước 8 — Segment (L6)  ([chi tiết](phases/step-08-segment.md))
 > Mục tiêu: từ DSL ra bitmap segment.
@@ -76,7 +76,7 @@ Quy ước:
 - [ ] Bitmap codec (Go + Kotlin), golden bytes lấy từ StarRocks thật
 - [ ] `segment-manager` (Kotlin): CRUD, validate DSL, estimate
 - [ ] `segment-builder` (Go): evaluate AND/OR/SUB, ghi S3 + Postgres, bắn Kafka
-- [ ] Done khi: `seg_1001 = {3}`, `seg_1002 = {1,2}` (theo golden) và build lại cùng version ra cùng kết quả.
+- [ ] Done khi: `seg_0001 = {1,3}` (theo golden §0.1) và build lại cùng version ra cùng kết quả.
 
 ## Bước 9 — Activation (L7)  ([chi tiết](phases/step-09-activation.md))
 > Mục tiêu: tra cứu segment nhanh.
@@ -98,3 +98,5 @@ Quy ước:
 - [ ] S2b product → `NOT_MUTEX` `STATE`
 - [ ] S3 churn score (file loader) → `MUTEX` `EVENT`
 - [ ] S4/S5 → `EXTENDED` (voucher, OA, app event)
+- [ ] Golden đầy đủ `seg_1001`, `seg_1002`, `seg_1003` chạy đúng
+- [ ] Catalog Iceberg dev: đổi SQLite → Postgres nếu nhiều sink bronze bị `SQLITE_BUSY`

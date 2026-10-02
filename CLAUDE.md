@@ -172,6 +172,8 @@ Hệ quả `STATE`: với **mọi** window kết thúc ở `r`, kết quả = `S
 
 ### 3.5 Ma trận bắt buộc: mỗi layer xử lý 4 loại thế nào
 
+> Đây là đích cuối. Giai đoạn hiện tại chỉ làm cột/hàng `MUTEX` + `STATE`; ô chưa làm = `TODO` + lỗi tường minh.
+
 | Layer / thành phần | MUTEX | NOT_MUTEX | PARTIAL_VALUE | PARTIAL_VALUE_BY_TAG |
 |---|---|---|---|---|
 | L2 Silver | giữ `event_ts`, `event_id` để sắp thứ tự ADD/REMOVE | như MUTEX | giữ `value` DECIMAL, không làm tròn | như PARTIAL_VALUE + giữ `tag` |
@@ -391,7 +393,7 @@ vision/
     └── docs/{data-types.md,data-flow-examples.md,capacity.md,phases.md}
 ```
 
-**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7`.
+**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7` · Flink `1.20.2` (Java 17) · Iceberg `1.9.2` · flink-connector-kafka `3.3.0-1.20` · Hadoop client `3.3.6` (jar Flink pin sha256 ở `MODULE.bazel`).
 - Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (tham khảo thor) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (bước 4).
 - JVM deps: sửa `artifacts` trong `MODULE.bazel` → `bazel run @maven//:pin` (lock `maven_install.json`, `fail_if_repin_required`).
 - Go: `gazelle:map_kind go_binary com_tm_go_image` → gazelle quản lý `go_library`/`go_test`, binary luôn qua macro image.
@@ -415,7 +417,7 @@ java_library(
 )
 ```
 
-**Image**: `com.tm.{py,go,kt,airflow}.<name>:v1.0.0`; target `<name>`, `<name>_image`, `<name>_docker`.
+**Image**: `com.tm.{py,go,kt,flink,airflow}.<name>:v1.0.0` (Flink: `//com/tm/src/ingest/cdc/flink:bronze_ingest_docker`, fat jar + jar Iceberg/Hadoop vào image `flink` pin digest); target `<name>`, `<name>_image`, `<name>_docker`.
 
 **Lệnh**
 ```bash
@@ -423,6 +425,7 @@ bazel build //...
 bazel test //...
 bazel run //:gazelle
 bazel run @maven//:pin
+bazel run --config=linux-arm64 //com/tm/src/ingest/cdc/flink:bronze_ingest_docker   # image job Flink (compose dùng, pull_policy never)
 bazel run //com/tm/src/activation/api:activation_api_docker
 bazel run --config=linux-amd64 //com/tm/src/segment/builder:segment_builder_docker
 docker compose -f com/tm/docker/vision/docker-compose.yml up -d
@@ -475,7 +478,7 @@ docker compose -f com/tm/docker/vision/docker-compose.yml up -d
 **SQL**: một file/bước; template `{{ ds }}`, `{{ attr_id }}`; header ghi input/output + cách idempotent.
 
 **Test bắt buộc**: temporal property test + golden · bitmap codec golden bytes · DSL validate matrix (dataType × dateRange × tagOp × valueRange) · API integration test với `.roar` nhỏ.
-Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 loại** (MUTEX, NOT_MUTEX, PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG); với MUTEX/NOT_MUTEX thì cả `EVENT` và `STATE`, có ca REMOVE; với PARTIAL_VALUE(_BY_TAG) thì mọi `aggFunc`; với NOT_MUTEX / PARTIAL_VALUE_BY_TAG thì cả `STANDARD` và `EXTENDED`.
+Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 loại** (giai đoạn hiện tại: chỉ `MUTEX` `STATE`; thêm tham số khi mở rộng, ca chưa hỗ trợ phải test là lỗi tường minh) (MUTEX, NOT_MUTEX, PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG); với MUTEX/NOT_MUTEX thì cả `EVENT` và `STATE`, có ca REMOVE; với PARTIAL_VALUE(_BY_TAG) thì mọi `aggFunc`; với NOT_MUTEX / PARTIAL_VALUE_BY_TAG thì cả `STANDARD` và `EXTENDED`.
 
 **Rẽ nhánh theo loại**: dùng `switch`/`when`/`match` **exhaustive** trên `(dataType, feedMode, attributeType)` và `aggFunc`; nhánh không hỗ trợ → lỗi rõ ràng, **không** `default` rơi ngầm về một loại.
 
@@ -499,7 +502,7 @@ Tổng quan: `com/tm/docs/phases.md`; checklist tổng hợp: `com/tm/docs/check
 | 9 | L7 | activation-api |
 | 10 | Vận hành | DQ, Airflow, metrics, scale (làm dần từ bước 5) |
 
-Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại.
+Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng các loại trong phạm vi hiện tại (đích cuối: cả 4 loại).
 
 ---
 

@@ -11,6 +11,7 @@
 Bài toán ──▶ segment ví dụ ──▶ nguồn dữ liệu cần (payment, profile, churn…) ──▶ ca biên (trùng, muộn, xoá/đổi)
 ```
 
+- Tài liệu mô tả đủ các nguồn (đích cuối), nhưng giai đoạn hiện tại chỉ triển khai S2a `user_profile`; ví dụ đầu tiên là `seg_0001` (`data-flow-examples.md` §0.1).
 - Mỗi nguồn ghi rõ: ai sinh ra, dạng **event** hay **snapshot**, khoá, cột thời gian.
 - Ví dụ dùng `data-flow-examples.md` làm khung; đây cũng là golden test cho các bước sau.
 - Chưa tạo attribute hay catalog ở bước này.

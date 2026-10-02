@@ -35,6 +35,22 @@ As-of `ds = 2026-09-15` (`e = 20711`). Ký hiệu bitmap `{1,2}` = tập `uidx`.
 
 ---
 
+## 0.1 Luồng hiện tại — 1 nguồn `user_profile` → `user_city` (MUTEX, STATE) → `seg_0001`
+
+Dữ liệu và từng layer của `user_city` ở §2.1 (L0 → L5). Hai bước còn lại:
+
+**L6 Segment** — `seg_0001` "user đang ở HN":
+```json
+{"segmentId": "seg_0001", "rule": {"condition": {"attr": "user_city", "tags": ["hn"], "dateRange": "A7"}}, "schedule": {"type": "DAILY"}, "serving": "ONLINE"}
+```
+`user_city` hn A7 (= `STATE(2026-09-15)`) → **`{1,3}`**, count = 2.
+
+**L7 Activation**: `count(seg_0001) = 2`; `contains(U1003, seg_0001) = true`; `contains(U1002, seg_0001) = false` (U1002 ở HCM); `segments by user U1001` ⊇ `seg_0001`. Mọi response kèm `version` + `asOfDs = 2026-09-15`.
+
+Các mục §1, §3–§7 là đích cuối (cần nguồn/loại chưa làm).
+
+---
+
 ## 1. S1 — payment_event (NOT_MUTEX + PARTIAL_VALUE + PARTIAL_VALUE_BY_TAG)
 
 ### L0 Source — topic `vision.src.payment_event.v1`
@@ -153,7 +169,14 @@ A7 = `B0[09-09] ⊕ B1[09-10..11] ⊕ B2[09-12..15]`:
 ```
 U1003 ở HN từ 2024, không có thay đổi.
 
-**L1 Bronze** — `bronze.user_profile_cdc_raw`: payload nguyên văn + offset.
+**L1 Bronze** — `bronze.user_profile_cdc_raw` (partition `ingest_hour`), mỗi message Kafka một dòng, payload nguyên văn:
+
+| topic | kafka_partition | kafka_offset | msg_key | op | source_ts_ms | cdc_ts_ms | payload |
+|---|---|---|---|---|---|---|---|
+| vision.src.user_profile.v1 | 1 | 41 | `{"user_id":"U1001"}` | u | 1789441200000 | 1789441200123 | `{"op":"u","before":{…HCM},"after":{…HN},…}` |
+| vision.src.user_profile.v1 | 0 | 17 | `{"user_id":"U1002"}` | c | 1789444800000 | 1789444800150 | `{"op":"c","before":null,"after":{…HCM},…}` |
+
+(+ `kafka_ts`, `ingest_ts`, `ingest_hour`.) Xoá dòng ở OLTP → `op = d`, `after = null`. Số dòng bronze ≥ số thay đổi ở OLTP (at-least-once; trùng xử lý ở silver).
 
 **L2 Silver** — `silver.user_profile_scd2` (Spark `MERGE`):
 

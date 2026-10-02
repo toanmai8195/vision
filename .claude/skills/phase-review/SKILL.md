@@ -16,7 +16,7 @@ Tham số tuỳ chọn: số bước (vd `/phase-review 3`) → chỉ review bư
    - `git log --oneline --grep "step N"` → các commit của phase.
    - Kiểm tra sản phẩm có thật trên đĩa/hệ thống: file/thư mục theo mô tả ở `phases/step-0N-*.md`, service trong `docker-compose.yml`, bảng/schema, test. Chỉ chạy lệnh đọc (`ls`, `git`, `docker compose ps`, query `SELECT`); test chỉ chạy nếu nhanh và không đổi trạng thái.
    - Lệch: task đã tick nhưng không thấy sản phẩm; hoặc có sản phẩm mà chưa tick.
-3. So với thiết kế (`CLAUDE.md`, file step): còn chỗ nào làm khác thiết kế, `TODO(verify)`, hoặc chỉ hỗ trợ thiếu trong 4 loại dữ liệu.
+3. So với thiết kế (`CLAUDE.md`, file step): còn chỗ nào làm khác thiết kế, `TODO(verify)`, hoặc chỉ hỗ trợ thiếu so với phạm vi hiện tại (đích cuối 4 loại).
 
 ## Báo cáo (ngắn, theo từng phase)
 

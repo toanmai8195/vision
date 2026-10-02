@@ -14,7 +14,7 @@ Tham số tuỳ chọn: số bước (vd `/phase-plan 5`). Không có → phase 
 3. Kiểm tra phase theo các câu hỏi:
    - **Input sẵn sàng?** Output phase trước có đủ cho phase này không.
    - **Task đủ rõ?** Mỗi task có làm được mà không phải đoán; thiếu quyết định nào của user.
-   - **Thứ tự hợp lý?** Có task phụ thuộc task sau; thiếu task (vd quên thêm service compose, test, xử lý đủ 4 loại dữ liệu).
+   - **Thứ tự hợp lý?** Có task phụ thuộc task sau; thiếu task (vd quên thêm service compose, test, xử lý các loại dữ liệu trong phạm vi hiện tại).
    - **Quá to / thừa?** Task nào nên tách (một commit không gọn) hoặc bỏ.
    - **Done khi đo được?** Tiêu chí kiểm chứng cụ thể, chạy được.
    - **Đụng thiết kế?** Có mâu thuẫn với `CLAUDE.md` (cần sửa thiết kế trước, §13.4).
