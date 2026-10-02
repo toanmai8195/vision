@@ -1,15 +1,14 @@
-# Bước 14 — MUTEX EVENT — S3 churn score (file ML)
+# Bước 14 — NOT_MUTEX STATE — S2b product holding
 
 > Mở rộng sau khi xong luồng 1 nguồn (bước 3→9 với `user_city`). Mỗi task chạy lại qua các layer đã có, chỉ thêm nhánh cho loại/nguồn mới; nhánh chưa làm vẫn báo lỗi tường minh.
 
 | | Nội dung |
 |---|---|
-| **Input** | file parquet churn score → `churn_score_band` (`MUTEX`, `EVENT`, `STANDARD`; band low/mid/high) |
-| **Output** | `bronze.churn_score_raw`; `silver.churn_score`; `ADD/DEL/ADD(d,0)`, `LATEST`, `SEEN`; `tag_range_bitmap` cho `churn_score_band` |
+| **Input** | `src.user_product` (CDC) → `product_holding` (`NOT_MUTEX`, `STATE`) |
+| **Output** | `bronze.user_product_cdc_raw`; `silver.user_product_scd2`; `ADDED/REMOVED/STATE` theo từng tag; `tag_range_bitmap` cho `product_holding` |
 
 ```
-file ML ──PySpark loader (sensor _SUCCESS)──▶ bronze ──▶ silver.churn_score (score→band)
-  ──▶ ADD/DEL, ADD(d,0) ──▶ block trên ADD(·,0) ──▶ LATEST ──▶ LATEST ∩ SEEN ──▶ tag_range_bitmap
+user_product ──CDC──▶ bronze ──Spark MERGE──▶ silver SCD2 ──▶ ADDED/REMOVED ──▶ STATE(d,t) ──▶ tag_range_bitmap
 ```
 
 - Thiết kế: `CLAUDE.md` §3.5 (cột loại này), §4; ví dụ/golden: `data-flow-examples.md`; cách chọn loại: `data-types.md`.

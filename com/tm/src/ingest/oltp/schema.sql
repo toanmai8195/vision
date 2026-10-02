@@ -1,6 +1,6 @@
 -- Schema OLTP (L0): Postgres nguồn nghiệp vụ, tách khỏi Postgres `meta` (bước 5).
 -- Input : bài toán + nguồn ở com/tm/docs/problem.md §3. Phạm vi hiện tại: chỉ S2a user_profile.
--- Các nguồn khác (S1 payment, S2b product, S4 voucher/OA, S5 app_event) được thêm lại ở bước 11–15; bản cũ có trong git (commit 84ca0a2).
+-- Các nguồn khác (S1 payment, S2b product, S4 voucher/OA, S5 app_event) được thêm lại ở bước 11–16; bản cũ có trong git (commit 84ca0a2).
 -- Output: bảng của từng nguồn; Debezium (bước 3) đọc log của các bảng này.
 -- Idempotent: chạy lại nhiều lần không lỗi, không mất dữ liệu (IF NOT EXISTS).
 --

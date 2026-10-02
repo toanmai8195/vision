@@ -6,7 +6,7 @@ Mặc định GHI THẲNG vào Postgres OLTP (driver psycopg, 1 transaction: l�
 
 - Kết nối: `--dsn` hoặc biến môi trường VISION_OLTP_DSN (mặc định = Postgres OLTP trong compose, cổng 5433).
 - `--print-sql`: không kết nối DB, chỉ in SQL ra stdout (để đọc/kiểm tra, hoặc pipe vào psql).
-- Tham số theo CLAUDE.md §6: `--users --days --attrs` (attrs = nhóm nguồn; hiện chỉ `profile`, thêm nguồn ở bước 11–15).
+- Tham số theo CLAUDE.md §6: `--users --days --attrs` (attrs = nhóm nguồn; hiện chỉ `profile`, thêm nguồn ở bước 11–16).
 - Deterministic: cùng tham số (kể cả `--seed`) ra cùng data; mỗi nguồn có RNG riêng nên chọn tập `--attrs`
   khác nhau không làm đổi data của nguồn còn lại.
 - Chạy lại được: user sinh ra có mã `G0000001…` (không đụng U1001..U1004 của seed_examples.sql).
@@ -25,7 +25,7 @@ import sys
 from dataclasses import dataclass
 from typing import Iterator, Sequence
 
-ATTRS = ("profile",)  # nhóm nguồn hiện có; thêm nguồn (payment, product, ...) ở bước 11–15
+ATTRS = ("profile",)  # nhóm nguồn hiện có; thêm nguồn (payment, product, ...) ở bước 11–16
 STATE_ATTRS = ("profile",)  # bảng trạng thái: UPDATE/DELETE
 
 CITIES = ("HCM", "HN", "DN", "CT")

@@ -6,7 +6,7 @@
 -- Ánh xạ user: U1001 = uidx 1, U1002 = 2, U1003 = 3.
 -- Ca biên: đổi giá trị (city U1001 HCM -> HN), user mới (U1002), không đổi từ lâu (U1003).
 --   Ca xoá city (UPDATE city_code = NULL hoặc DELETE dòng) chưa seed, thử tay bằng psql.
--- Các nguồn khác (payment, product, voucher, OA, app, churn file) được thêm lại ở bước 11–15 (bản cũ: git 84ca0a2).
+-- Các nguồn khác (payment, product, voucher, OA, app, churn file) được thêm lại ở bước 11–16 (bản cũ: git 84ca0a2).
 
 BEGIN;
 

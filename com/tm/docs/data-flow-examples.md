@@ -5,8 +5,8 @@
 
 > **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
 > Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
-> bước 11 S1 payment → `NOT_MUTEX`; 12 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`; 13 S2b product → `NOT_MUTEX` `STATE`;
-> 14 S3 churn score → `MUTEX` `EVENT`; 15 S4/S5 → `EXTENDED` (xem `checklist.md`).
+> bước 11 S1 payment — raw/silver đủ cột, xử lý `MUTEX` (`last_txn_category`) trước; 12 `NOT_MUTEX`; 13 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`;
+> 14 S2b product → `NOT_MUTEX` `STATE`; 15 S4/S5 → `EXTENDED`; 16 S3 churn file → `MUTEX` `EVENT` + REMOVE (xem `checklist.md`).
 > Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
 
 ## 0. Bối cảnh
@@ -47,7 +47,54 @@ Dữ liệu và từng layer của `user_city` ở §2.1 (L0 → L5). Hai bướ
 
 **L7 Activation**: `count(seg_0001) = 2`; `contains(U1003, seg_0001) = true`; `contains(U1002, seg_0001) = false` (U1002 ở HCM); `segments by user U1001` ⊇ `seg_0001`. Mọi response kèm `version` + `asOfDs = 2026-09-15`.
 
-Các mục §1, §3–§7 là đích cuối (cần nguồn/loại chưa làm).
+Các mục §3–§7 là đích cuối (cần nguồn/loại chưa làm). §1.0 là bước mở rộng đầu tiên (bước 11).
+
+## 1.0 Mở rộng bước 11 — payment chỉ xử lý MUTEX: `last_txn_category` (MUTEX, EVENT)
+
+Ingest đủ cột: L0 → L2 giống §1 (bronze nguyên văn, `silver.payment_txn` đủ `mcc`, `amount`, `status`). Từ L3 chỉ dùng thông tin MUTEX: `status = SUCCESS`, `mcc → tag`, `event_ts`; **không** dùng `amount`, không tính `txn_category` / `pv_daily`.
+
+Attribute `last_txn_category`: ngành hàng của giao dịch SUCCESS **gần nhất** (mỗi giao dịch là một ADD, không có REMOVE). Tag rule như §1: `5812,5814 → fnb`, `4722 → travel`, `4900 → bill`. Thứ tự trong ngày theo `(event_ts, event_id)`.
+
+**L3 Daily** (`ADD` = ADD cuối ngày của từng user; `ADD(d,0)` = hợp mọi tag):
+
+| ds | ADD fnb | ADD travel | ADD bill | ADD(d,0) | ghi chú |
+|---|---|---|---|---|---|
+| 2026-09-10 | {2} | {} | {} | {2} | e-8001 |
+| 2026-09-14 | {} | {} | {3} | {3} | e-9005 (đến muộn, tính lại ds 09-14) |
+| 2026-09-15 | {2} | {1} | {} | {1,2} | U1001: fnb (03:02Z) rồi travel (05:10Z) → chỉ ADD cuối là travel; U1002: e-9003 (ICT 09-15); e-9004 FAILED bị bỏ |
+
+DEL rỗng mọi ngày.
+
+**L4 Temporal** — `LATEST(d,t) = ADD(d,t) ∪ (LATEST(d−1,t) − ADD(d,0))`:
+
+| ds | LATEST fnb | LATEST travel | LATEST bill |
+|---|---|---|---|
+| 2026-09-10 → 09-13 | {2} | {} | {} |
+| 2026-09-14 | {2} | {} | {3} |
+| 2026-09-15 | **{2}** | **{1}** | **{3}** |
+
+U1001 rời fnb ở 09-15 vì ADD mới (travel) xoá tag cũ.
+
+**L5 Range** — `LATEST(r,t) ∩ SEEN[l,r]`, `SEEN = ⋃ ADD(·,0)`:
+
+| date_range | SEEN | fnb | travel | bill |
+|---|---|---|---|---|
+| A1 | {1,2} | {2} | {1} | {} |
+| A7 | {1,2,3} | {2} | {1} | {3} |
+| A30 | {1,2,3} | {2} | {1} | {3} |
+
+Tag rời nhau trong mỗi window (DQ MUTEX).
+
+**L6 Segment** — `seg_0002` "ở HN, giao dịch gần nhất không phải du lịch":
+```json
+{"segmentId": "seg_0002", "rule": {"operator": "SUB", "children": [
+  {"condition": {"attr": "user_city", "tags": ["hn"], "dateRange": "A7"}},
+  {"condition": {"attr": "last_txn_category", "tags": ["travel"], "dateRange": "A7"}}
+]}}
+```
+`{1,3} − {1} = ` **`{3}`**.
+
+> Các số trên tính tay theo định nghĩa `CLAUDE.md` §3.2 / §4.3; đối chiếu lại bằng `reference.py` khi có (bước 5) trước khi dùng làm golden test.
 
 ---
 

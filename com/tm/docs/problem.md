@@ -6,8 +6,8 @@
 
 > **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
 > Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
-> bước 11 S1 payment → `NOT_MUTEX`; 12 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`; 13 S2b product → `NOT_MUTEX` `STATE`;
-> 14 S3 churn score → `MUTEX` `EVENT`; 15 S4/S5 → `EXTENDED` (xem `checklist.md`).
+> bước 11 S1 payment — raw/silver đủ cột, xử lý `MUTEX` (`last_txn_category`) trước; 12 `NOT_MUTEX`; 13 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`;
+> 14 S2b product → `NOT_MUTEX` `STATE`; 15 S4/S5 → `EXTENDED`; 16 S3 churn file → `MUTEX` `EVENT` + REMOVE (xem `checklist.md`).
 > Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
 
 ## 0. Tóm tắt một đoạn

@@ -13,7 +13,7 @@ schema.sql ──▶ Postgres OLTP ◀── seed script (data ví dụ + ca bi�
 - Dựng Python trên Bazel (rules_python, `pip.parse`, macro `com_tm_py_image`) cho seed generator.
 - Schema theo từng nguồn: bảng, cột, kiểu, khoá, cột thời gian. Bảng event (payment) insert-only; bảng trạng thái (profile, product) có update/delete.
 - Seed có cả ca biên: trùng, đến muộn, xoá/đổi giá trị. Script chạy lại được.
-- OLTP hiện chỉ có bảng `src.user_profile` (schema, seed, generator). Các nguồn khác thêm lại ở bước 11–15 (bản cũ có đủ 6 bảng + seed + generator trong git, commit `84ca0a2`).
+- OLTP hiện chỉ có bảng `src.user_profile` (schema, seed, generator). Các nguồn khác thêm lại ở bước 11–16 (bản cũ có đủ 6 bảng + seed + generator trong git, commit `84ca0a2`).
 - Phân biệt với Postgres `meta` (catalog) — dựng ở bước 5.
 
 Chạy seed bằng compose (`com/tm/docker/vision/docker-compose.yml`):
