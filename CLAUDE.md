@@ -5,8 +5,8 @@
 >
 > **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
 > Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
-> (1) S1 payment → `NOT_MUTEX` rồi `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + các `aggFunc`; (2) S2b product → `NOT_MUTEX` `STATE`;
-> (3) S3 churn score → `MUTEX` `EVENT`; (4) S4/S5 → `EXTENDED`.
+> bước 11 S1 payment → `NOT_MUTEX`; 12 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`; 13 S2b product → `NOT_MUTEX` `STATE`;
+> 14 S3 churn score → `MUTEX` `EVENT`; 15 S4/S5 → `EXTENDED` (xem `checklist.md`).
 > Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
 >
 > **⚠️ Đích cuối: hệ thống PHẢI xử lý đủ 4 loại dữ liệu: `MUTEX` · `NOT_MUTEX` · `PARTIAL_VALUE` · `PARTIAL_VALUE_BY_TAG`** ở mọi layer — xem §3.2, §3.5, luật §13.
@@ -501,6 +501,11 @@ Tổng quan: `com/tm/docs/phases.md`; checklist tổng hợp: `com/tm/docs/check
 | 8 | L6 | proto segment, codec, segment-manager, segment-builder |
 | 9 | L7 | activation-api |
 | 10 | Vận hành | DQ, Airflow, metrics, scale (làm dần từ bước 5) |
+| 11 | Mở rộng | `NOT_MUTEX` `EVENT` — S1 payment |
+| 12 | Mở rộng | `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG` + `aggFunc` |
+| 13 | Mở rộng | `NOT_MUTEX` `STATE` — S2b product |
+| 14 | Mở rộng | `MUTEX` `EVENT` — S3 churn score (file loader) |
+| 15 | Mở rộng | `EXTENDED` — S4/S5 (usage-driven) |
 
 Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng các loại trong phạm vi hiện tại (đích cuối: cả 4 loại).
 
