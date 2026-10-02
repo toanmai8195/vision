@@ -5,7 +5,8 @@ Nguồn duy nhất để theo dõi tiến độ. Mỗi bước = 1 phase. Thiế
 Quy ước:
 - Mỗi dòng `- [ ]` là **1 task** = 1 commit. Làm theo thứ tự từ trên xuống.
 - Dòng `Done khi:` là tiêu chí nghiệm thu phase; tick khi đã kiểm chứng. Tất cả task + Done của phase xong → **push**.
-- Mọi bước đụng dữ liệu chỉ done khi chạy đúng cả 4 loại (MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG).
+- **Phạm vi hiện tại: 1 nguồn (S2a `user_profile`, `MUTEX` `STATE`).** Các bước từ 3 trở đi chỉ cần chạy đúng với nguồn/loại này; thêm nguồn và loại khác ở mục "Mở rộng" cuối file.
+- Đích cuối: đủ 4 loại (MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG).
 - Skill `/execute` đọc file này để chọn task tiếp theo.
 
 ## Bước 0 — Nền móng  ([chi tiết](phases/step-00-foundation.md))
@@ -33,8 +34,8 @@ Quy ước:
 ## Bước 3 — Bronze (L1, OLAP)  ([chi tiết](phases/step-03-bronze.md))
 > Mục tiêu: data từ OLTP đi vào Iceberg bronze, chưa làm sạch. Ghi OLTP trước, ingest sang OLAP (không ghi song song).
 - [x] Thêm Kafka, Debezium, Flink, MinIO + Iceberg REST vào compose
-- [x] CDC: Debezium đọc log OLTP → Kafka → Flink SQL → `bronze.*_raw` (Iceberg), giữ bản ghi gốc + thời điểm thay đổi + loại thao tác
-- [ ] Bảng event (payment) và bảng trạng thái (profile, product) đều qua CDC; churn score (file) qua file loader
+- [x] CDC: Debezium đọc log OLTP → Kafka → Flink Java (DataStream) → `bronze.user_profile_cdc_raw` (Iceberg), giữ bản ghi gốc + thời điểm thay đổi + loại thao tác
+- [ ] Bảng trạng thái `user_profile` qua CDC (nguồn duy nhất giai đoạn này; payment, product, churn score… thêm ở "Mở rộng")
 - [ ] Insert/update/delete ở OLTP sau đó đều xuất hiện trong bronze
 - [ ] Done khi: số bản ghi và nội dung bronze khớp OLTP, kể cả sau khi sửa/xoá.
 
@@ -89,3 +90,11 @@ Quy ước:
 - [ ] Metrics, dashboard, alert (không dùng label cardinality cao)
 - [ ] Scale 100M user / 500 attribute / 5K segment; runbook
 - [ ] Done khi: 5K segment publish trước 07:00 ICT trên dữ liệu synthetic.
+
+## Mở rộng — thêm nguồn và loại dữ liệu (sau khi xong luồng 1 nguồn)
+> Mỗi mục: thêm topic/bảng bronze, silver, attribute, test cho loại đó ở mọi layer đã làm; chỉ tick khi chạy đúng.
+- [ ] S1 payment → `NOT_MUTEX` (`EVENT`)
+- [ ] S1 payment → `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG` (mọi `aggFunc`)
+- [ ] S2b product → `NOT_MUTEX` `STATE`
+- [ ] S3 churn score (file loader) → `MUTEX` `EVENT`
+- [ ] S4/S5 → `EXTENDED` (voucher, OA, app event)

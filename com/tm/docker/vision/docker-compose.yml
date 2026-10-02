@@ -142,7 +142,7 @@ services:
     command:
       - |
         mc alias set local http://minio:9000 vision vision-secret &&
-        mc mb --ignore-existing local/vision-warehouse local/vision-segments
+        mc mb --ignore-existing local/vision-warehouse local/vision-segments local/vision-flink
 
   # Iceberg REST catalog, warehouse s3://vision-warehouse trên MinIO. Metadata catalog lưu SQLite trong volume.
   iceberg-rest:
@@ -168,36 +168,54 @@ services:
       timeout: 5s
       retries: 30
 
-  # Flink 1.20 session cluster (UI http://localhost:8081). Image build từ ./flink (có jar Kafka/Iceberg/Hadoop).
+  # Flink 1.20 application mode: JobManager tự chạy job BronzeIngest (Kafka -> Iceberg bronze), UI http://localhost:8081.
+  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/ingest/cdc/flink:bronze_ingest_docker
+  # Checkpoint ở s3://vision-flink/checkpoints (Iceberg sink chỉ commit khi checkpoint xong).
   flink-jobmanager:
-    build: ./flink
-    image: vision/flink:1.20.2-iceberg1.9.2
+    image: com.tm.flink.bronze_ingest:v1.0.0
+    pull_policy: never
     container_name: vision-flink-jobmanager
-    command: jobmanager
+    command: ["standalone-job", "--job-classname", "com.tm.vision.ingest.cdc.BronzeIngest"]
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+      iceberg-rest: { condition: service_healthy }
     ports: ["8081:8081"]
     environment:
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-hadoop-1.20.2.jar
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        rest.address: flink-jobmanager
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8081/overview >/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
+        state.checkpoints.dir: s3://vision-flink/checkpoints
+        state.savepoints.dir: s3://vision-flink/savepoints
+        state.checkpoints.num-retained: 3
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        restart-strategy.type: exponential-delay
+        restart-strategy.exponential-delay.initial-backoff: 2s
+        restart-strategy.exponential-delay.max-backoff: 30s
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: vision
+        s3.secret-key: vision-secret
 
   flink-taskmanager:
-    build: ./flink
-    image: vision/flink:1.20.2-iceberg1.9.2
+    image: com.tm.flink.bronze_ingest:v1.0.0
+    pull_policy: never
     container_name: vision-flink-taskmanager
-    command: taskmanager
+    command: ["taskmanager"]
     depends_on:
-      flink-jobmanager: { condition: service_healthy }
+      - flink-jobmanager
     environment:
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-hadoop-1.20.2.jar
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: vision
+        s3.secret-key: vision-secret
 
-  # One-shot: tạo sẵn topic CDC (Flink source không chịu topic chưa tồn tại, kể cả khi bảng nguồn còn rỗng).
+  # One-shot: tạo sẵn topic CDC (Flink Kafka source không chịu topic chưa tồn tại, kể cả khi bảng nguồn còn rỗng).
   kafka-init:
     image: apache/kafka:3.8.0
     container_name: vision-kafka-init
@@ -207,7 +225,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        for t in payment_event user_profile user_product voucher_grant oa_follow app_event; do
+        for t in user_profile; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
             --topic vision.src.$$t.v1 --partitions 3 --replication-factor 1
         done
@@ -223,24 +241,6 @@ services:
     volumes:
       - ../../src/ingest/cdc:/cdc:ro
     entrypoint: ["bash", "/cdc/debezium/register.sh"]
-
-  # One-shot: nộp job Flink SQL bronze_ingest (Kafka -> Iceberg bronze). Bỏ qua nếu job đang chạy.
-  flink-sql-submit:
-    image: vision/flink:1.20.2-iceberg1.9.2
-    container_name: vision-flink-sql-submit
-    depends_on:
-      flink-jobmanager: { condition: service_healthy }
-      flink-taskmanager: { condition: service_started }
-      iceberg-rest: { condition: service_healthy }
-      kafka-init: { condition: service_completed_successfully }
-    restart: "no"
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        rest.address: flink-jobmanager
-    volumes:
-      - ../../src/ingest/cdc:/cdc:ro
-    entrypoint: ["bash", "/cdc/flink/submit.sh"]
 
 volumes:
   postgres-oltp-data:

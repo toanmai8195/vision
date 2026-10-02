@@ -43,3 +43,76 @@ use_repo(
     "python_base_linux_amd64",
     "python_base_linux_arm64_v8",
 )
+
+# --- Java (Flink) ---
+bazel_dep(name = "rules_java", version = "8.14.0")
+bazel_dep(name = "rules_jvm_external", version = "6.7")
+
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "maven",
+    artifacts = [
+        "org.apache.flink:flink-streaming-java:1.20.2",
+        "org.apache.flink:flink-clients:1.20.2",
+        "org.apache.flink:flink-connector-base:1.20.2",
+        "org.apache.flink:flink-table-common:1.20.2",
+        "org.apache.flink:flink-table-runtime:1.20.2",
+        "org.apache.hadoop:hadoop-client-api:3.3.6",
+        "org.apache.iceberg:iceberg-flink-runtime-1.20:1.9.2",
+        "org.apache.flink:flink-connector-kafka:3.3.0-1.20",
+        "com.fasterxml.jackson.core:jackson-databind:2.17.2",
+        "junit:junit:4.13.2",
+    ],
+    fail_if_repin_required = True,
+    lock_file = "//:maven_install.json",
+    repositories = ["https://repo1.maven.org/maven2"],
+)
+use_repo(maven, "maven")
+
+# --- Image Flink: base Flink + jar Iceberg/AWS/Hadoop vào /opt/flink/lib + fat jar của job vào /opt/flink/usrlib ---
+oci.pull(
+    name = "flink_base",
+    digest = "sha256:f0f0a1bcdad2b1b21246256b4c3754c527833930750a5189270aa639043a25c0",
+    image = "docker.io/library/flink",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+)
+use_repo(
+    oci,
+    "flink_base",
+    "flink_base_linux_amd64",
+    "flink_base_linux_arm64_v8",
+)
+
+# Jar bổ sung cho Flink (pin sha256), khớp phiên bản compile ở maven.install.
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "flink_lib_iceberg_flink_runtime",
+    downloaded_file_path = "iceberg-flink-runtime-1.20-1.9.2.jar",
+    sha256 = "5ec33ae836c06fc5bc2144fac1a1960f813ef29c0a26852303af84e2ae59cdc5",
+    urls = ["https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.9.2/iceberg-flink-runtime-1.20-1.9.2.jar"],
+)
+
+http_file(
+    name = "flink_lib_iceberg_aws_bundle",
+    downloaded_file_path = "iceberg-aws-bundle-1.9.2.jar",
+    sha256 = "ea5b6fec1b547e2fe936f804c737943f5ee322d038560f63a8261deb766def1b",
+    urls = ["https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.9.2/iceberg-aws-bundle-1.9.2.jar"],
+)
+
+http_file(
+    name = "flink_lib_hadoop_client_api",
+    downloaded_file_path = "hadoop-client-api-3.3.6.jar",
+    sha256 = "f3d2347a6e1c6885d5bcfd4f60c3ac3810ec11068fc161e04329baabf412d963",
+    urls = ["https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.3.6/hadoop-client-api-3.3.6.jar"],
+)
+
+http_file(
+    name = "flink_lib_hadoop_client_runtime",
+    downloaded_file_path = "hadoop-client-runtime-3.3.6.jar",
+    sha256 = "15f01bc804294df06d2effc87de363a83cf589f50558bdbf48f72541ad8de854",
+    urls = ["https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.6/hadoop-client-runtime-3.3.6.jar"],
+)

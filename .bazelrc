@@ -7,6 +7,12 @@ build --strategy=CopyToDirectory=local
 build --strategy=CopyFile=local
 build --repo_env=DOCKER_CONFIG=/dev/null
 
+# Java 17 (Flink 1.20 hỗ trợ chính thức)
+build --java_language_version=17
+build --java_runtime_version=remotejdk_17
+build --tool_java_language_version=17
+build --tool_java_runtime_version=remotejdk_17
+
 # Image đúng kiến trúc máy chạy container:
 #   bazel run --config=linux-arm64 <target>_docker   (Mac Apple Silicon)
 build:linux-amd64 --platforms=//:linux_amd64

@@ -1,0 +1,123 @@
+load("@rules_java//java:defs.bzl", "java_binary", "java_library", "java_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@tar.bzl", "tar")
+
+# Class do image Flink cung cấp (/opt/flink/lib, xem flink_lib_tar) -> dùng để compile, không đóng vào fat jar (deploy_env).
+_FLINK_PROVIDED = [
+    "@maven//:org_apache_flink_flink_clients",
+    "@maven//:org_apache_flink_flink_connector_base",
+    "@maven//:org_apache_flink_flink_core",
+    "@maven//:org_apache_flink_flink_core_api",
+    "@maven//:org_apache_flink_flink_metrics_core",
+    "@maven//:org_apache_flink_flink_streaming_java",
+    "@maven//:org_apache_flink_flink_table_common",
+    "@maven//:org_apache_flink_flink_table_runtime",
+    "@maven//:org_apache_hadoop_hadoop_client_api",
+    "@maven//:org_apache_iceberg_iceberg_flink_runtime_1_20",
+    "@maven//:org_slf4j_slf4j_api",
+]
+
+java_library(
+    name = "flink_provided",
+    exports = _FLINK_PROVIDED,
+)
+
+java_binary(
+    name = "flink_provided_bin",
+    main_class = "none",
+    runtime_deps = [":flink_provided"],
+)
+
+java_library(
+    name = "bronze_lib",
+    srcs = glob(
+        ["*.java"],
+        exclude = ["*Test.java"],
+    ),
+    deps = [
+        ":flink_provided",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        "@maven//:org_apache_flink_flink_connector_kafka",
+        "@maven//:org_apache_kafka_kafka_clients",
+    ],
+)
+
+# Đọc CDC từ Kafka, ghi nguyên văn vào Iceberg bronze.*_raw; chạy trên cluster Flink (checkpoint cấu hình ở compose).
+# Fat jar chỉ chứa code job + connector Kafka + Jackson; được đóng vào image bên dưới.
+java_binary(
+    name = "bronze_ingest",
+    deploy_env = [":flink_provided_bin"],
+    main_class = "com.tm.vision.ingest.cdc.BronzeIngest",
+    runtime_deps = [":bronze_lib"],
+)
+
+java_test(
+    name = "bronze_record_parser_test",
+    srcs = ["BronzeRecordParserTest.java"],
+    test_class = "com.tm.vision.ingest.cdc.BronzeRecordParserTest",
+    deps = [
+        ":bronze_lib",
+        "@maven//:junit_junit",
+    ],
+)
+
+java_test(
+    name = "iceberg_bronze_test",
+    srcs = ["IcebergBronzeTest.java"],
+    test_class = "com.tm.vision.ingest.cdc.IcebergBronzeTest",
+    deps = [
+        ":bronze_lib",
+        ":flink_provided",
+        "@maven//:junit_junit",
+    ],
+)
+
+# ---------------------------------------------------------------------------
+# Image Flink chạy job (JobManager và TaskManager dùng chung image này):
+#   //com/tm/src/ingest/cdc/flink:bronze_ingest_image    oci_image
+#   //com/tm/src/ingest/cdc/flink:bronze_ingest_docker   load vào Docker local: com.tm.flink.bronze_ingest:v1.0.0
+#   bazel run --config=linux-arm64 //com/tm/src/ingest/cdc/flink:bronze_ingest_docker
+# ---------------------------------------------------------------------------
+
+# Jar Iceberg (sink), AWS bundle (S3FileIO) và Hadoop client (Iceberg Flink cần) -> /opt/flink/lib
+tar(
+    name = "flink_lib_tar",
+    srcs = [
+        "@flink_lib_hadoop_client_api//file",
+        "@flink_lib_hadoop_client_runtime//file",
+        "@flink_lib_iceberg_aws_bundle//file",
+        "@flink_lib_iceberg_flink_runtime//file",
+    ],
+    out = "flink_lib_layer.tar",
+    mtree = [
+        "./opt/flink/lib/iceberg-flink-runtime-1.20-1.9.2.jar uid=0 gid=0 mode=0644 type=file content=$(execpath @flink_lib_iceberg_flink_runtime//file)",
+        "./opt/flink/lib/iceberg-aws-bundle-1.9.2.jar uid=0 gid=0 mode=0644 type=file content=$(execpath @flink_lib_iceberg_aws_bundle//file)",
+        "./opt/flink/lib/hadoop-client-api-3.3.6.jar uid=0 gid=0 mode=0644 type=file content=$(execpath @flink_lib_hadoop_client_api//file)",
+        "./opt/flink/lib/hadoop-client-runtime-3.3.6.jar uid=0 gid=0 mode=0644 type=file content=$(execpath @flink_lib_hadoop_client_runtime//file)",
+    ],
+)
+
+# Fat jar của job -> /opt/flink/usrlib (application mode tự nạp jar ở đây)
+tar(
+    name = "bronze_ingest_job_tar",
+    srcs = [":bronze_ingest_deploy.jar"],
+    out = "bronze_ingest_job_layer.tar",
+    mtree = ["./opt/flink/usrlib/bronze-ingest.jar uid=0 gid=0 mode=0644 type=file content=$(execpath :bronze_ingest_deploy.jar)"],
+)
+
+oci_image(
+    name = "bronze_ingest_image",
+    base = "@flink_base",
+    tars = [
+        ":flink_lib_tar",
+        ":bronze_ingest_job_tar",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "bronze_ingest_docker",
+    image = ":bronze_ingest_image",
+    repo_tags = ["com.tm.flink.bronze_ingest:v1.0.0"],
+    visibility = ["//visibility:public"],
+)

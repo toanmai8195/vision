@@ -4,6 +4,12 @@
 >
 > Thứ tự đọc: **thực tế** (§1–§2) → **dữ liệu nền tảng sinh ra** (§3) → **bài toán cần giải** (§4–§5) → **hệ thống vào/ra, ràng buộc** (§6–§7).
 
+> **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
+> Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
+> (1) S1 payment → `NOT_MUTEX` rồi `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + các `aggFunc`; (2) S2b product → `NOT_MUTEX` `STATE`;
+> (3) S3 churn score → `MUTEX` `EVENT`; (4) S4/S5 → `EXTENDED`.
+> Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
+
 ## 0. Tóm tắt một đoạn
 
 Nền tảng thanh toán có hàng chục triệu người dùng, mỗi người để lại dấu vết (hồ sơ, giao dịch, sản phẩm, quà, hành vi). Marketer muốn nói "gửi ưu đãi cho nhóm người **như thế này**" và nhận về đúng danh sách người đó, mỗi sáng, cho hàng nghìn nhóm. Vision đọc các dấu vết đó từ DB của nền tảng, tính sẵn ra các "nhóm" và trả lời nhanh các câu hỏi về nhóm. Vision **chỉ đọc**, không tham gia luồng thanh toán.

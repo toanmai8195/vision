@@ -3,7 +3,13 @@
 > **Bản thiết kế + luật làm việc** cho repo `vision`. Code phải khớp định nghĩa ở đây.
 > Đổi semantics (loại dữ liệu, range, DSL, API) → **sửa file này trước**, rồi code + golden test.
 >
-> **⚠️ Hệ thống PHẢI xử lý đủ 4 loại dữ liệu: `MUTEX` · `NOT_MUTEX` · `PARTIAL_VALUE` · `PARTIAL_VALUE_BY_TAG`** ở mọi layer — xem §3.2, §3.5, luật §13.
+> **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
+> Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
+> (1) S1 payment → `NOT_MUTEX` rồi `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + các `aggFunc`; (2) S2b product → `NOT_MUTEX` `STATE`;
+> (3) S3 churn score → `MUTEX` `EVENT`; (4) S4/S5 → `EXTENDED`.
+> Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
+>
+> **⚠️ Đích cuối: hệ thống PHẢI xử lý đủ 4 loại dữ liệu: `MUTEX` · `NOT_MUTEX` · `PARTIAL_VALUE` · `PARTIAL_VALUE_BY_TAG`** ở mọi layer — xem §3.2, §3.5, luật §13.
 > Hai chiều cấu hình trực giao với loại dữ liệu: **`aggFunc`** (hàm aggregate của `PARTIAL_VALUE(_BY_TAG)`, §3.2.1) và **`attributeType`** `STANDARD`/`EXTENDED` (tag khai báo sẵn hay chuỗi tự do cardinality cao, §3.6).
 >
 > Tài liệu chi tiết (đọc khi cần, không nạp mặc định):
@@ -38,7 +44,7 @@
 | **Go** | `segment-builder` | rules_go + gazelle, `RoaringBitmap/roaring/v2` |
 | **Kotlin + Vert.x + Dagger2** | `segment-manager`, `activation-api` | JVM 21, Vert.x 5 coroutines, Dagger qua `java_plugin` |
 | **Kafka** | Source event bus + domain event | *bổ sung* |
-| **Debezium + Flink SQL** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze | *bổ sung*, tham khảo thor |
+| **Debezium + Flink (Java, DataStream)** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze; job Java 17 chạy application mode, tham khảo repo `ironman` (`com/tm/flink`) | *bổ sung* |
 | **Spark (PySpark)** | Bronze → Silver (dedup, MERGE CDC, SCD2), backfill | *bổ sung* |
 | **Iceberg** (REST catalog) + **MinIO/S3** | bronze, silver, archive | |
 | **StarRocks 3.5.x** | Gold: tag bitmap, partial value, temporal, range, segment bitmap; đọc Iceberg qua external catalog | |
@@ -55,7 +61,7 @@
 
 ```
 L0 SOURCE        L1 INGESTION       L2 STANDARDIZE       L3 DAILY             L4 TEMPORAL          L5 RANGE              L6 SEGMENT             L7 ACTIVATION
-S1 payment (OLTP)→ CDC→Kafka→Flink   → Spark: dedup, ds,  → StarRocks:         → planner(Py)→SQL:   → tag_range_bitmap    → segment-builder(Go) → activation-api
+S1 payment (OLTP)→ CDC→Kafka→Flink(Java)→ Spark: dedup, ds,  → StarRocks:         → planner(Py)→SQL:   → tag_range_bitmap    → segment-builder(Go) → activation-api
 S2 profile (OLTP)→ Iceberg bronze      →  SCD2, uidx dict   →  tag_daily (ADD/DEL)→  blocks, LATEST,    →  pv_range_value      →  DSL→bitmap, cache  →  (Kotlin/Vert.x)
 S3 ML score file→ Spark file load  →  silver (Iceberg)  →  pv_daily (AGG)     →  STATE checkpoint   →  (mọi supported      →  S3 snapshot, Kafka →  mmap roaring
                   bronze (raw)                                                                         date range)
@@ -288,7 +294,7 @@ Metadata Postgres `meta`: `attribute` (gồm `agg_func`, `attribute_type`), `tag
 
 ## 6. Thành phần
 
-**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → Flink SQL → `bronze.*_raw` exactly-once (tham khảo thor nếu cần); bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
+**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → job Flink Java (`com/tm/src/ingest/cdc/flink`, tham khảo `ironman`) → `bronze.*_raw`; bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
 
 **Standardize (L2)** — PySpark: parse, dedup `event_id`, `ds` theo ICT, DLQ, Iceberg `MERGE` CDC → SCD2. **Dictionary** `user_id → uidx` append-only, không tái sử dụng; sync Redis + `meta.user_dict_rev(uidx, user_id)`. `UNIVERSE(ds)` = bitmap user hợp lệ. Derived attribute (vd `spend_band`) tính ở đây, đi vào như `STATE`.
 
@@ -372,7 +378,7 @@ vision/
 └── com/tm/
     ├── proto/vision/{segment,catalog,event}/v1/
     ├── src/
-    │   ├── ingest/{oltp(seed+DDL),cdc(debezium,flink SQL),loader(Py)}/
+    │   ├── ingest/{oltp(seed+DDL),cdc(debezium,flink Java),loader(Py)}/
     │   ├── batch/{silver,dictionary}/            # PySpark
     │   ├── sql/starrocks/{ddl,daily,dq}/
     │   ├── temporal/                             # model, blocks, latest, ranges, planner, engine, reference, testdata/golden
@@ -499,7 +505,7 @@ Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại
 
 ## 13. Luật khi Claude làm việc trong repo này
 
-1. **Luôn xử lý đủ 4 loại dữ liệu** — `MUTEX`, `NOT_MUTEX`, `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG`. Mọi thay đổi ở daily/temporal/range/DSL/segment-builder/activation phải:
+1. **Đích cuối là đủ 4 loại dữ liệu** (giai đoạn hiện tại chỉ làm `MUTEX` `STATE` từ 1 nguồn, xem đầu file; các loại còn lại chưa làm thì ghi `TODO` + lỗi tường minh, không bỏ qua im lặng) — `MUTEX`, `NOT_MUTEX`, `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG`. Mọi thay đổi ở daily/temporal/range/DSL/segment-builder/activation phải:
    - đối chiếu ma trận §3.5 cho từng loại;
    - có test cho từng loại (MUTEX/NOT_MUTEX: cả EVENT và STATE, có REMOVE; PARTIAL_VALUE*: mọi `aggFunc`; NOT_MUTEX/PARTIAL_VALUE_BY_TAG: cả STANDARD và EXTENDED);
    - chỉ báo xong khi cả 4 loại chạy đúng. Nếu cố ý chưa hỗ trợ một loại → báo rõ cho user + `TODO` + lỗi tường minh trong code, không bỏ qua im lặng.
