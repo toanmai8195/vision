@@ -16,7 +16,7 @@ OLTP ──Debezium──▶ Kafka vision.src.user_profile.v1 ──Flink Java (
 - Cột bronze: `topic, kafka_partition, kafka_offset, kafka_ts, msg_key, payload, op, source_ts_ms, cdc_ts_ms, ingest_ts, ingest_hour` (partition theo `ingest_hour`, UTC). Payload hỏng vẫn được giữ (cột trích sẵn null); tombstone bị bỏ.
 - Build + chạy: `bazel run --config=linux-arm64 //com/tm/src/ingest/cdc/flink:bronze_ingest_docker` rồi `docker compose -f com/tm/docker/vision/docker-compose.yml up -d` (UI Flink http://localhost:8081).
 - CDC giao at-least-once → trùng được xử lý ở silver. Bronze chưa làm sạch; retention 30 ngày.
-- Catalog Iceberg dev dùng SQLite nên **chỉ chịu được ít sink commit song song**; thêm nhiều nguồn cùng lúc có thể gây `SQLITE_BUSY` và job restart (đã gặp với 6 sink). Khi mở rộng: đổi catalog sang Postgres hoặc kiểm tra lại độ ổn định.
+- Catalog Iceberg dev (`iceberg-rest`) lưu metadata ở Postgres, database `iceberg_catalog` trong cùng instance `postgres-oltp` (DB riêng, tách khỏi schema `src` mà Debezium đọc). Image build từ `com/tm/docker/vision/iceberg-rest/Dockerfile` (fixture + driver Postgres, pin sha256). Dùng SQLite mặc định thì 6 sink commit song song gây `SQLITE_BUSY` và job restart liên tục; với Postgres đã thử 6 sink có tải: 0 restart, đủ bản ghi.
 - Thêm nguồn sau: thêm topic vào connector Debezium (`table.include.list`, `message.key.columns`), `kafka-init`, 1 dòng ở `IcebergBronze.TOPIC_TO_TABLE`. Churn score (file ML) đi qua PySpark loader riêng, thêm ở bước 14.
 
 Checklist: xem mục "Bước 3" trong `../checklist.md`.

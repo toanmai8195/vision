@@ -144,24 +144,41 @@ services:
         mc alias set local http://minio:9000 vision vision-secret &&
         mc mb --ignore-existing local/vision-warehouse local/vision-segments local/vision-flink
 
-  # Iceberg REST catalog, warehouse s3://vision-warehouse trên MinIO. Metadata catalog lưu SQLite trong volume.
+  # Iceberg REST catalog, warehouse s3://vision-warehouse trên MinIO. Metadata catalog lưu ở Postgres (DB iceberg_catalog).
+  # One-shot: tạo database `iceberg_catalog` (cùng instance Postgres OLTP, DB riêng, tách khỏi schema `src` mà Debezium đọc).
+  iceberg-catalog-init:
+    image: postgres:16.4
+    container_name: vision-iceberg-catalog-init
+    depends_on:
+      postgres-oltp: { condition: service_healthy }
+    restart: "no"
+    environment:
+      PGPASSWORD: vision
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        psql -h postgres-oltp -U vision -d oltp -tAc "SELECT 1 FROM pg_database WHERE datname='iceberg_catalog'" | grep -q 1 ||
+          psql -h postgres-oltp -U vision -d oltp -c "CREATE DATABASE iceberg_catalog"
+
   iceberg-rest:
-    image: apache/iceberg-rest-fixture:1.9.2
+    build: ./iceberg-rest
+    image: vision/iceberg-rest:1.9.2-pg
     container_name: vision-iceberg-rest
     depends_on:
       minio-init: { condition: service_completed_successfully }
+      iceberg-catalog-init: { condition: service_completed_successfully }
     ports: ["8181:8181"]
     environment:
       CATALOG_WAREHOUSE: s3://vision-warehouse/
-      CATALOG_URI: jdbc:sqlite:file:/home/iceberg/iceberg_catalog.db?journal_mode=WAL&busy_timeout=30000
+      CATALOG_URI: jdbc:postgresql://postgres-oltp:5432/iceberg_catalog
+      CATALOG_JDBC_USER: vision
+      CATALOG_JDBC_PASSWORD: vision
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
       AWS_ACCESS_KEY_ID: vision
       AWS_SECRET_ACCESS_KEY: vision-secret
       AWS_REGION: us-east-1
-    volumes:
-      - iceberg-catalog:/home/iceberg
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8181/v1/config >/dev/null"]
       interval: 5s
@@ -246,4 +263,3 @@ volumes:
   postgres-oltp-data:
   kafka-data:
   minio-data:
-  iceberg-catalog:
