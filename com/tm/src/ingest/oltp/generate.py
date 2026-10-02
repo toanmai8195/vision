@@ -6,15 +6,13 @@ Mặc định GHI THẲNG vào Postgres OLTP (driver psycopg, 1 transaction: l�
 
 - Kết nối: `--dsn` hoặc biến môi trường VISION_OLTP_DSN (mặc định = Postgres OLTP trong compose, cổng 5433).
 - `--print-sql`: không kết nối DB, chỉ in SQL ra stdout (để đọc/kiểm tra, hoặc pipe vào psql).
-- Tham số theo CLAUDE.md §6: `--users --days --attrs` (attrs = nhóm nguồn: payment, profile, product, voucher, oa, app).
+- Tham số theo CLAUDE.md §6: `--users --days --attrs` (attrs = nhóm nguồn; hiện chỉ `profile`, thêm nguồn ở bước 11–15).
 - Deterministic: cùng tham số (kể cả `--seed`) ra cùng data; mỗi nguồn có RNG riêng nên chọn tập `--attrs`
   khác nhau không làm đổi data của nguồn còn lại.
 - Chạy lại được: user sinh ra có mã `G0000001…` (không đụng U1001..U1004 của seed_examples.sql).
-  Bảng event: `ON CONFLICT DO NOTHING` theo event_id xác định; bảng trạng thái: xoá dòng của user `G%` rồi phát
-  lại chuỗi INSERT -> UPDATE -> DELETE. `--reset` xoá luôn event `G%` của các nguồn được chọn (dùng khi đổi
-  tham số, vì ON CONFLICT DO NOTHING không sửa dòng cũ).
-- Ca biên có trong data sinh ra: giao dịch FAILED, đến muộn (created_at > event_ts), user đổi city, user mất
-  city (xoá dòng), đóng sản phẩm, unfollow OA, tag EXTENDED mới xuất hiện dần theo ngày.
+  Bảng trạng thái: xoá dòng của user `G%` rồi phát lại chuỗi INSERT -> UPDATE -> DELETE. `--reset` chỉ có nghĩa
+  với bảng event (chưa có nguồn event nào; thêm cùng nguồn event ở bước 11).
+- Ca biên có trong data sinh ra: user đổi city, user mất city (xoá dòng).
 """
 
 from __future__ import annotations
@@ -27,13 +25,10 @@ import sys
 from dataclasses import dataclass
 from typing import Iterator, Sequence
 
-ATTRS = ("payment", "profile", "product", "voucher", "oa", "app")
-STATE_ATTRS = ("profile", "product")  # bảng trạng thái: UPDATE/DELETE
+ATTRS = ("profile",)  # nhóm nguồn hiện có; thêm nguồn (payment, product, ...) ở bước 11–15
+STATE_ATTRS = ("profile",)  # bảng trạng thái: UPDATE/DELETE
 
-MCCS = ("5812", "5814", "4722", "4900", "5411", "5311")
 CITIES = ("HCM", "HN", "DN", "CT")
-PRODUCTS = ("paylater", "insurance", "wallet_plus")
-APP_EVENTS = ("view_promo", "open_screen_x", "open_screen_y", "tap_banner")
 
 UTC = dt.timezone.utc
 
@@ -48,10 +43,6 @@ class Config:
     attrs: tuple[str, ...] = ATTRS
     seed: int = 42
     reset: bool = False
-    txn_per_user_day: float = 0.3
-    voucher_per_user_day: float = 0.02
-    app_per_user_day: float = 0.5
-    tag_pool: int = 200  # số mã quà/OA ban đầu; tăng dần theo ngày (EXTENDED)
 
     # Ngày đầu của khoảng dữ liệu = end_date lùi (days-1) ngày. @property = getter, gọi như field: cfg.start_date.
     @property
@@ -98,27 +89,6 @@ def _count(rate: float, rng: random.Random) -> int:
     return whole + (1 if rng.random() < rate - whole else 0)
 
 
-# Sinh dữ liệu cho src.payment_event (S1). Trả về list các tuple (hàng), mỗi tuple đúng thứ tự cột:
-# (event_id, user_id, mcc, amount, status, event_ts, created_at).
-# Ca biên: ~3% giao dịch FAILED; ~2% đến muộn (created_at = event_ts + 1..3 ngày).
-# Tuple = bộ giá trị bất biến, giống một record/Object[] nhỏ; ở đây dùng thay cho class Row.
-def gen_payment(cfg: Config) -> list[Row]:
-    """(event_id, user_id, mcc, amount, status, event_ts, created_at). ~3% FAILED, ~2% đến muộn 1–3 ngày."""
-    rng = _rng(cfg, "payment")
-    rows: list[Row] = []
-    n = 0
-    for _, day in _days(cfg):
-        for uid in user_ids(cfg.users):
-            for _ in range(_count(cfg.txn_per_user_day, rng)):
-                n += 1
-                ts = _ts(day, rng)
-                amount = max(1000, round(rng.lognormvariate(11, 1.0) / 1000) * 1000)
-                status = "FAILED" if rng.random() < 0.03 else "SUCCESS"
-                late = dt.timedelta(days=rng.randint(1, 3)) if rng.random() < 0.02 else dt.timedelta(seconds=1)
-                rows.append((f"gp-{n:09d}", uid, rng.choice(MCCS), amount, status, ts, ts + late))
-    return rows
-
-
 # Sinh dữ liệu cho src.user_profile (S2a, bảng trạng thái). Trả về 3 nhóm thao tác để phát lại theo thứ tự:
 #   inserts: (user_id, city_code, created_at, updated_at)  - mỗi user 1 dòng
 #   updates: (user_id, city_moi, updated_at)               - ~10% user đổi sang city KHÁC
@@ -145,89 +115,6 @@ def gen_profile(cfg: Config) -> tuple[list[Row], list[Row], list[str]]:
         elif roll < 0.12:
             deletes.append(uid)
     return inserts, updates, deletes
-
-
-# Sinh dữ liệu cho src.user_product (S2b, bảng trạng thái). Trả về (inserts, deletes):
-#   inserts: (user_id, product, opened_at, updated_at) - mỗi user có 0..2 sản phẩm
-#   deletes: (user_id, product)                        - ~20% người có sản phẩm đóng một cái
-# rng.sample(PRODUCTS, k) = chọn k phần tử khác nhau, không lặp.
-def gen_product(cfg: Config) -> tuple[list[Row], list[tuple[str, str]]]:
-    """(inserts, deletes). Mỗi user 0–2 sản phẩm; 20% người có sản phẩm đóng một cái.
-
-    inserts: (user_id, product, opened_at, updated_at); deletes: (user_id, product).
-    """
-    rng = _rng(cfg, "product")
-    inserts: list[Row] = []
-    deletes: list[tuple[str, str]] = []
-    start = dt.datetime.combine(cfg.start_date, dt.time(), tzinfo=UTC)
-    for uid in user_ids(cfg.users):
-        held = rng.sample(PRODUCTS, rng.choice((0, 0, 1, 1, 2)))
-        for product in held:
-            opened = start - dt.timedelta(days=rng.randint(1, 365), seconds=rng.randrange(86400))
-            inserts.append((uid, product, opened, opened))
-        if held and rng.random() < 0.20:
-            deletes.append((uid, rng.choice(held)))
-    return inserts, deletes
-
-
-# Chọn chỉ số mã quà/OA (gift_g<k>, oa_g<k>). Vùng chọn mở rộng thêm 5 mã mỗi ngày
-# (tag_pool + day_i*5) để mỗi ngày đều xuất hiện mã MỚI -> mô phỏng tag EXTENDED cardinality cao.
-def _tag_index(cfg: Config, day_i: int, rng: random.Random) -> int:
-    """Chỉ số mã quà/OA; vùng mã mở rộng dần mỗi ngày -> luôn có tag EXTENDED mới."""
-    return rng.randrange(cfg.tag_pool + day_i * 5)
-
-
-# Sinh dữ liệu cho src.voucher_grant (S4a): (event_id, user_id, voucher_code, value, event_ts, created_at).
-def gen_voucher(cfg: Config) -> list[Row]:
-    """(event_id, user_id, voucher_code, value, event_ts, created_at)."""
-    rng = _rng(cfg, "voucher")
-    rows: list[Row] = []
-    n = 0
-    for i, day in _days(cfg):
-        for uid in user_ids(cfg.users):
-            for _ in range(_count(cfg.voucher_per_user_day, rng)):
-                n += 1
-                ts = _ts(day, rng)
-                rows.append((f"gv-{n:09d}", uid, f"gift_g{_tag_index(cfg, i, rng)}",
-                             rng.choice((10000, 20000, 50000, 100000, 200000)), ts, ts + dt.timedelta(seconds=1)))
-    return rows
-
-
-# Sinh dữ liệu cho src.oa_follow (S4b): (event_id, user_id, oa_code, action, event_ts, created_at).
-# Mỗi lần FOLLOW có 30% xác suất kèm một UNFOLLOW sau đó (luôn sau thời điểm FOLLOW, trong khoảng dữ liệu).
-def gen_oa(cfg: Config) -> list[Row]:
-    """(event_id, user_id, oa_code, action, event_ts, created_at). 30% FOLLOW có UNFOLLOW sau đó."""
-    rng = _rng(cfg, "oa")
-    rows: list[Row] = []
-    n = 0
-    end = dt.datetime.combine(cfg.end_date + dt.timedelta(days=1), dt.time(), tzinfo=UTC)
-    for i, day in _days(cfg):
-        for uid in user_ids(cfg.users):
-            for _ in range(_count(cfg.voucher_per_user_day, rng)):
-                code = f"oa_g{_tag_index(cfg, i, rng)}"
-                ts = _ts(day, rng)
-                n += 1
-                rows.append((f"go-{n:09d}", uid, code, "FOLLOW", ts, ts + dt.timedelta(seconds=1)))
-                if rng.random() < 0.30 and ts < end - dt.timedelta(hours=1):
-                    later = ts + dt.timedelta(seconds=rng.randrange(1, int((end - ts).total_seconds())))
-                    n += 1
-                    rows.append((f"go-{n:09d}", uid, code, "UNFOLLOW", later, later + dt.timedelta(seconds=1)))
-    return rows
-
-
-# Sinh dữ liệu cho src.app_event (S5): (event_id, user_id, event_name, event_ts, created_at).
-def gen_app(cfg: Config) -> list[Row]:
-    """(event_id, user_id, event_name, event_ts, created_at)."""
-    rng = _rng(cfg, "app")
-    rows: list[Row] = []
-    n = 0
-    for _, day in _days(cfg):
-        for uid in user_ids(cfg.users):
-            for _ in range(_count(cfg.app_per_user_day, rng)):
-                n += 1
-                ts = _ts(day, rng)
-                rows.append((f"ga-{n:09d}", uid, rng.choice(APP_EVENTS), ts, ts + dt.timedelta(seconds=1)))
-    return rows
 
 
 # --------------------------------------------------------------------------------------------
@@ -261,14 +148,6 @@ def lit(v: object) -> str:
     return "'" + s + "'"
 
 
-EVENT_TABLES = {
-    "payment": ("payment_event", "event_id, user_id, mcc, amount, status, event_ts, created_at", gen_payment),
-    "voucher": ("voucher_grant", "event_id, user_id, voucher_code, value, event_ts, created_at", gen_voucher),
-    "oa": ("oa_follow", "event_id, user_id, oa_code, action, event_ts, created_at", gen_oa),
-    "app": ("app_event", "event_id, user_id, event_name, event_ts, created_at", gen_app),
-}
-
-
 # Tạo Op INSERT cho `rows` vào bảng `table` (cols = danh sách cột, đúng thứ tự phần tử của mỗi tuple).
 # `conflict` là đoạn thêm cuối câu, vd ON CONFLICT DO NOTHING (bỏ qua nếu trùng khoá -> chạy lại được).
 def _insert(table: str, cols: str, rows: Sequence[Row], conflict: str = "") -> Op:
@@ -277,8 +156,7 @@ def _insert(table: str, cols: str, rows: Sequence[Row], conflict: str = "") -> O
 
 
 # Hàm chính: trả về TOÀN BỘ các bước ghi theo thứ tự, theo từng nguồn trong cfg.attrs:
-#   - Bảng event: (tuỳ --reset) DELETE data G% cũ, rồi INSERT ... ON CONFLICT DO NOTHING.
-#   - Bảng trạng thái: luôn DELETE dòng G% cũ rồi phát lại INSERT -> UPDATE -> DELETE.
+#   - Bảng trạng thái (profile): luôn DELETE dòng G% cũ rồi phát lại INSERT -> UPDATE -> DELETE.
 # Hàm KHÔNG đụng DB: chỉ mô tả "sẽ ghi gì", để dùng chung cho cả ghi thật (apply) lẫn in SQL (render) và
 # dễ test. `yield` trả từng Op một (generator, như Iterator của Java). Nhánh `else` cố ý ném lỗi (không rơi
 # ngầm), theo luật "switch exhaustive" ở CLAUDE.md §11.
@@ -289,23 +167,13 @@ def build_ops(cfg: Config) -> Iterator[Op]:
     for attr in ATTRS:
         if attr not in cfg.attrs:
             continue
-        if attr in EVENT_TABLES:
-            table, cols, gen = EVENT_TABLES[attr]
-            if cfg.reset:
-                yield Op(f"DELETE FROM src.{table} WHERE user_id LIKE 'G%'")
-            yield _insert(table, cols, gen(cfg), "\nON CONFLICT (event_id) DO NOTHING")
-        elif attr == "profile":
+        if attr == "profile":
             yield Op("DELETE FROM src.user_profile WHERE user_id LIKE 'G%'")
             inserts, updates, deletes = gen_profile(cfg)
             yield _insert("user_profile", "user_id, city_code, created_at, updated_at", inserts)
             yield Op("UPDATE src.user_profile SET city_code = %s, updated_at = %s WHERE user_id = %s",
                      tuple((city, when, uid) for uid, city, when in updates))
             yield Op("DELETE FROM src.user_profile WHERE user_id = %s", tuple((u,) for u in deletes))
-        elif attr == "product":
-            yield Op("DELETE FROM src.user_product WHERE user_id LIKE 'G%'")
-            inserts_p, deletes_p = gen_product(cfg)
-            yield _insert("user_product", "user_id, product, opened_at, updated_at", inserts_p)
-            yield Op("DELETE FROM src.user_product WHERE user_id = %s AND product = %s", tuple(deletes_p))
         else:
             raise NotImplementedError(attr)
 
@@ -356,10 +224,6 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[Config, str, bool]:
     p.add_argument("--attrs", default=",".join(ATTRS), help=f"nhóm nguồn, phân tách dấu phẩy: {','.join(ATTRS)}")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--reset", action="store_true", help="xoá event G%% của các nguồn được chọn trước khi sinh")
-    p.add_argument("--txn-per-user-day", type=float, default=Config.txn_per_user_day)
-    p.add_argument("--voucher-per-user-day", type=float, default=Config.voucher_per_user_day)
-    p.add_argument("--app-per-user-day", type=float, default=Config.app_per_user_day)
-    p.add_argument("--tag-pool", type=int, default=Config.tag_pool)
     p.add_argument("--dsn", default=os.environ.get("VISION_OLTP_DSN", DEFAULT_DSN),
                    help="chuỗi kết nối Postgres (mặc định: $VISION_OLTP_DSN hoặc OLTP trong compose)")
     p.add_argument("--print-sql", action="store_true", help="không ghi DB, chỉ in SQL ra stdout")
@@ -367,9 +231,7 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[Config, str, bool]:
     if a.users < 1 or a.days < 1:
         p.error("--users và --days phải ≥ 1")
     cfg = Config(users=a.users, days=a.days, end_date=a.end_date,
-                 attrs=tuple(x for x in a.attrs.split(",") if x), seed=a.seed, reset=a.reset,
-                 txn_per_user_day=a.txn_per_user_day, voucher_per_user_day=a.voucher_per_user_day,
-                 app_per_user_day=a.app_per_user_day, tag_pool=a.tag_pool)
+                 attrs=tuple(x for x in a.attrs.split(",") if x), seed=a.seed, reset=a.reset)
     return cfg, a.dsn, a.print_sql
 
 

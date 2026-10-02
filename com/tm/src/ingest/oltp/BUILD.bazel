@@ -5,7 +5,6 @@ load("//tools/rules:com_tm_container.bzl", "com_tm_py_image")
 exports_files([
     "schema.sql",
     "seed_examples.sql",
-    "churn_score_examples.csv",
     "seed.sh",
 ])
 

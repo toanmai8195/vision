@@ -93,7 +93,7 @@ Quy ước:
 
 ## Bước 11 — NOT_MUTEX — S1 payment, EVENT  ([chi tiết](phases/step-11-not-mutex.md))
 > Mục tiêu: thêm `txn_category` (`NOT_MUTEX`, `EVENT`, `STANDARD`; tag = ngành hàng theo MCC) chạy qua mọi layer.
-- [ ] Thêm `src.payment_event` vào CDC (connector, `kafka-init`, `TOPIC_TO_TABLE`); 2 sink bronze chạy ổn định (không restart)
+- [ ] Thêm `src.payment_event` vào OLTP (schema, seed khớp §1, generator; bản cũ ở git `84ca0a2`) và CDC (connector, `kafka-init`, `TOPIC_TO_TABLE`); 2 sink bronze chạy ổn định (không restart)
 - [ ] Silver `payment_txn`: dedup `event_id`, `ds` theo ICT, `FAILED` không vào tag, đến muộn tính lại `ds` cũ
 - [ ] Catalog attribute `txn_category` (`NOT_MUTEX`, `EVENT`); `reference.py` nhánh NOT_MUTEX `EVENT`
 - [ ] Daily: `ADD/DEL/SIG` theo từng tag (một user nhiều tag cùng ngày)
@@ -113,7 +113,7 @@ Quy ước:
 
 ## Bước 13 — NOT_MUTEX STATE — S2b product holding  ([chi tiết](phases/step-13-product-state.md))
 > Mục tiêu: thêm `product_holding` (`NOT_MUTEX`, `STATE`) chạy qua mọi layer.
-- [ ] Thêm `src.user_product` vào CDC (connector, topic, `TOPIC_TO_TABLE`)
+- [ ] Thêm `src.user_product` vào OLTP (schema, seed khớp §2.2, generator) và CDC (connector, topic, `TOPIC_TO_TABLE`)
 - [ ] Silver `user_product_scd2` (mở sản phẩm = INSERT, đóng = DELETE)
 - [ ] Catalog `product_holding` (`NOT_MUTEX`, `STATE`); `reference.py` nhánh NOT_MUTEX `STATE`
 - [ ] Daily/temporal: `STATE(d,t)` theo từng tag (nhiều tag/user; DELETE chỉ gỡ tag đó) + checkpoint tuần; range = `STATE(ds)`
@@ -121,7 +121,7 @@ Quy ước:
 
 ## Bước 14 — MUTEX EVENT — S3 churn score (file ML)  ([chi tiết](phases/step-14-churn-mutex-event.md))
 > Mục tiêu: thêm `churn_score_band` (`MUTEX`, `EVENT`, `STANDARD`; band low/mid/high) chạy qua mọi layer.
-- [ ] PySpark file loader có sensor `_SUCCESS` → `bronze.churn_score_raw`; chạy lại file `dt=<ds>` idempotent
+- [ ] Thêm file mẫu churn score (`churn_score_examples.csv`, bản cũ ở git `84ca0a2`); PySpark file loader có sensor `_SUCCESS` → `bronze.churn_score_raw`; chạy lại file `dt=<ds>` idempotent
 - [ ] Silver `churn_score` (map `score → band`), model chỉ chấm một phần user mỗi ngày
 - [ ] Catalog `churn_score_band` (`MUTEX`, `EVENT`); `reference.py` nhánh MUTEX `EVENT` (ADD gần nhất, REMOVE sau ADD, không quay lại tag cũ)
 - [ ] Daily `ADD/DEL`, `ADD(d,0)`; temporal block theo attribute + `LATEST`; range `LATEST ∩ SEEN`
@@ -130,7 +130,7 @@ Quy ước:
 
 ## Bước 15 — EXTENDED — S4/S5 (voucher, OA, app event)  ([chi tiết](phases/step-15-extended.md))
 > Mục tiêu: thêm attribute `EXTENDED` (tag là chuỗi tự do): `PARTIAL_VALUE_BY_TAG` (giá trị quà theo mã, số lần theo `event_name`, `COUNT`), `NOT_MUTEX` (follow OA, REMOVE khi unfollow) chạy qua mọi layer.
-- [ ] Thêm 3 bảng vào CDC; xác nhận bronze ổn định với 4+ sink
+- [ ] Thêm 3 bảng `voucher_grant`, `oa_follow`, `app_event` vào OLTP (schema, seed, generator) và CDC; xác nhận bronze ổn định với 4+ sink
 - [ ] Silver `tag_dict (attr_id, tag_string) → tag_id` append-only, không tái sử dụng; DQ `tag_dict` không đổi/xoá mapping cũ
 - [ ] Catalog `attributeType=EXTENDED` (chỉ NOT_MUTEX, PARTIAL_VALUE_BY_TAG; MUTEX `EXTENDED` báo lỗi tường minh); `reference.py` nhánh EXTENDED
 - [ ] Daily/temporal: chỉ tag có hoạt động; POS chỉ cập nhật tag có signal trong ngày
