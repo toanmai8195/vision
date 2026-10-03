@@ -211,8 +211,8 @@ A7 = `B0[09-09] ⊕ B1[09-10..11] ⊕ B2[09-12..15]`:
 
 **L0 Source** (Debezium):
 ```json
-{"op":"u","source":{"table":"user_profile"},"before":{"user_id":"U1001","city_code":"HCM","birth_date":"1990-05-20","gender":"F"},"after":{"user_id":"U1001","city_code":"HN","birth_date":"1990-05-20","gender":"F"},"ts_ms":1789441200000}
-{"op":"c","source":{"table":"user_profile"},"before":null,"after":{"user_id":"U1002","city_code":"HCM","birth_date":"2001-11-03","gender":"M"},"ts_ms":1789444800000}
+{"op":"u","source":{"table":"user_profile"},"before":{"user_id":"U1001","city_code":"HCM","birth_date":7444,"gender":"F"},"after":{"user_id":"U1001","city_code":"HN","birth_date":7444,"gender":"F"},"ts_ms":1789441200000}
+{"op":"c","source":{"table":"user_profile"},"before":null,"after":{"user_id":"U1002","city_code":"HCM","birth_date":11629,"gender":"M"},"ts_ms":1789444800000}
 ```
 U1003 ở HN từ 2024, không có thay đổi.
 
@@ -234,7 +234,7 @@ U1003 ở HN từ 2024, không có thay đổi.
 | 2 | HCM | 2001-11-03 | M | 2026-09-15 | 9999-12-31 | true |
 | 3 | HN | 1985-02-14 | NULL | 2024-06-01 | 9999-12-31 | true |
 
-U1002 là user mới → cấp `uidx = 2`. Một version mới được mở khi **bất kỳ** cột theo dõi (`city_code`, `birth_date`, `gender`) đổi; `user_city` chỉ quan tâm `city_code` nên daily so `city_code` giữa các version liền kề (đổi `gender` mà city giữ nguyên thì không sinh `ADDED/REMOVED` cho `user_city`). Tuổi = `datediff(ds, birth_date)` tính ở silver khi cần `age_band`.
+U1002 là user mới → cấp `uidx = 2`. Một version mới được mở khi **bất kỳ** cột theo dõi (`city_code`, `birth_date`, `gender`) đổi; `user_city` chỉ quan tâm `city_code` nên daily so `city_code` giữa các version liền kề (đổi `gender` mà city giữ nguyên thì không sinh `ADDED/REMOVED` cho `user_city`). Tuổi = `datediff(ds, birth_date)` tính ở silver khi cần `age_band`. Lưu ý L0: Debezium phát `DATE` dưới dạng **số ngày kể từ 1970-01-01** (`7444` = 1990-05-20, `11629` = 2001-11-03), silver phải đổi lại thành date.
 
 **L3 Daily** — `ADDED` = version có `valid_from = ds`, `REMOVED` = version có `valid_to = ds`:
 
