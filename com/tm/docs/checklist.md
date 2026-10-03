@@ -45,7 +45,7 @@ Quy ước:
 - [x] Spark (PySpark local, 1 container chạy theo lô): parse bronze CDC `user_profile`, dedup theo vị trí Kafka `(partition, offset)`, tính `ds` theo ICT, dòng lỗi vào DLQ → `silver.user_profile_cdc_events` + `silver.user_profile_cdc_dlq` (dedup `event_id` làm khi có nguồn event, bước 11)
 - [x] CDC → SCD2 (profile): `silver.user_profile_cdc_events` → `silver.user_profile_scd2` theo ngày (product thêm ở bước 14)
 - [x] Dictionary `user_id → uidx` (chỉ append, không tái sử dụng)
-- [ ] Done khi: chạy lại cùng `ds` ra cùng kết quả (idempotent); khớp `data-flow-examples.md`.
+- [x] Done khi: chạy lại cùng `ds` ra cùng kết quả (idempotent); khớp `data-flow-examples.md`. (`user_profile_silver_golden_test.py`, `verify_silver_idempotent.sh`)
 
 ## Bước 5 — Daily (L3)  ([chi tiết](phases/step-05-daily.md))
 > Mục tiêu: từ nhu cầu nghiệp vụ, khai báo attribute rồi rút gọn event thành trạng thái theo ngày.

@@ -8,6 +8,7 @@ exports_files([
     "user_dict_test.py",
     "user_profile_scd2.py",
     "user_profile_scd2_test.py",
+    "user_profile_silver_golden_test.py",
 ])
 
 # ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ tar(
         "user_dict_test.py",
         "user_profile_scd2.py",
         "user_profile_scd2_test.py",
+        "user_profile_silver_golden_test.py",
     ],
     out = "silver_user_profile_layer.tar",
     mtree = [
@@ -50,6 +52,7 @@ tar(
         "./app/com/tm/src/batch/silver/user_dict_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_dict_test.py)",
         "./app/com/tm/src/batch/silver/user_profile_scd2.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_scd2.py)",
         "./app/com/tm/src/batch/silver/user_profile_scd2_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_scd2_test.py)",
+        "./app/com/tm/src/batch/silver/user_profile_silver_golden_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_silver_golden_test.py)",
         "./app/com/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
         "./app/com/tm/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
         "./app/com/tm/src/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
