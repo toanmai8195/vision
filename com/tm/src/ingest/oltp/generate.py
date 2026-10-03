@@ -29,6 +29,7 @@ ATTRS = ("profile",)  # nhóm nguồn hiện có; thêm nguồn (payment, produc
 STATE_ATTRS = ("profile",)  # bảng trạng thái: UPDATE/DELETE
 
 CITIES = ("HCM", "HN", "DN", "CT")
+GENDERS = ("M", "F", "O", None)  # None = chưa khai báo
 
 UTC = dt.timezone.utc
 
@@ -90,14 +91,14 @@ def _count(rate: float, rng: random.Random) -> int:
 
 
 # Sinh dữ liệu cho src.user_profile (S2a, bảng trạng thái). Trả về 3 nhóm thao tác để phát lại theo thứ tự:
-#   inserts: (user_id, city_code, created_at, updated_at)  - mỗi user 1 dòng
+#   inserts: (user_id, city_code, birth_date, gender, created_at, updated_at) - mỗi user 1 dòng (birth_date 1960..2008)
 #   updates: (user_id, city_moi, updated_at)               - ~10% user đổi sang city KHÁC
 #   deletes: [user_id]                                     - ~2% user mất city (xoá dòng)
 # Python cho hàm trả nhiều giá trị cùng lúc (thực chất là 1 tuple); nơi gọi tách: a, b, c = gen_profile(cfg).
 def gen_profile(cfg: Config) -> tuple[list[Row], list[Row], list[str]]:
     """(inserts, updates, deletes). 10% user đổi city, 2% mất city (xoá dòng).
 
-    inserts: (user_id, city_code, created_at, updated_at); updates: (user_id, city_code, updated_at).
+    inserts: (user_id, city_code, birth_date, gender, created_at, updated_at); updates: (user_id, city_code, updated_at).
     """
     rng = _rng(cfg, "profile")
     inserts: list[Row] = []
@@ -107,7 +108,8 @@ def gen_profile(cfg: Config) -> tuple[list[Row], list[Row], list[str]]:
     for uid in user_ids(cfg.users):
         created = start - dt.timedelta(days=rng.randint(1, 700), seconds=rng.randrange(86400))
         city = rng.choice(CITIES)
-        inserts.append((uid, city, created, created))
+        birth = dt.date(1960, 1, 1) + dt.timedelta(days=rng.randrange(365 * 48))
+        inserts.append((uid, city, birth, rng.choice(GENDERS), created, created))
         roll = rng.random()
         when = _ts(cfg.start_date + dt.timedelta(days=rng.randrange(cfg.days)), rng)
         if roll < 0.10:
@@ -138,6 +140,8 @@ class Op:
 # truyền tham số): datetime -> '2026-09-15T03:00:00Z', số -> nguyên văn, chuỗi -> 'abc'.
 # Chuỗi chứa dấu nháy đơn bị từ chối (ném ValueError) vì ta ghép chuỗi SQL thủ công.
 def lit(v: object) -> str:
+    if v is None:
+        return "NULL"
     if isinstance(v, dt.datetime):
         return "'" + v.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") + "'"
     if isinstance(v, (int, float)):
@@ -170,7 +174,7 @@ def build_ops(cfg: Config) -> Iterator[Op]:
         if attr == "profile":
             yield Op("DELETE FROM src.user_profile WHERE user_id LIKE 'G%'")
             inserts, updates, deletes = gen_profile(cfg)
-            yield _insert("user_profile", "user_id, city_code, created_at, updated_at", inserts)
+            yield _insert("user_profile", "user_id, city_code, birth_date, gender, created_at, updated_at", inserts)
             yield Op("UPDATE src.user_profile SET city_code = %s, updated_at = %s WHERE user_id = %s",
                      tuple((city, when, uid) for uid, city, when in updates))
             yield Op("DELETE FROM src.user_profile WHERE user_id = %s", tuple((u,) for u in deletes))

@@ -13,16 +13,23 @@
 CREATE SCHEMA IF NOT EXISTS src;
 
 -- S2a Profile: trạng thái, 1 dòng/user. city_code NULL hoặc DELETE dòng = mất city (REMOVED).
+-- birth_date: ngày sinh (tuổi tính ở silver theo `ds`, không lưu tuổi vì bị cũ theo thời gian); NULL = chưa khai báo.
+-- gender: 'M' | 'F' | 'O'; NULL = chưa khai báo.
 CREATE TABLE IF NOT EXISTS src.user_profile (
     user_id    TEXT        PRIMARY KEY,
     city_code  TEXT,
+    birth_date DATE,
+    gender     TEXT        CHECK (gender IN ('M', 'F', 'O')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- DB đã tạo từ bản cũ (chưa có 2 cột này): thêm cột, chạy lại không lỗi.
+ALTER TABLE src.user_profile ADD COLUMN IF NOT EXISTS birth_date DATE;
+ALTER TABLE src.user_profile ADD COLUMN IF NOT EXISTS gender TEXT CHECK (gender IN ('M', 'F', 'O'));
 ALTER TABLE src.user_profile REPLICA IDENTITY FULL;
 -- Ví dụ (data-flow-examples.md §2.1; CDC thấy mỗi thay đổi dưới dạng op c/u/d):
---   user_id city_code  thay đổi
---   U1003   HN         có từ 2024-06-01, không đổi (STATE: vẫn thuộc hn ở mọi window)
---   U1001   HCM -> HN  UPDATE ngày 2026-09-15 (op=u: before HCM, after HN)
---   U1002   HCM        INSERT ngày 2026-09-15 (user mới, op=c)
+--   user_id city_code birth_date  gender thay đổi
+--   U1003   HN        1985-02-14  NULL   có từ 2024-06-01, không đổi (STATE: vẫn thuộc hn ở mọi window); chưa khai báo giới tính
+--   U1001   HCM -> HN 1990-05-20  F      UPDATE city ngày 2026-09-15 (op=u: before HCM, after HN)
+--   U1002   HCM       2001-11-03  M      INSERT ngày 2026-09-15 (user mới, op=c)
 --   (ca xoá) UPDATE city_code = NULL hoặc DELETE dòng -> REMOVED, không thuộc tag nào

@@ -33,10 +33,12 @@ Khi T đăng ký, dịch vụ hồ sơ tạo một dòng: `user_id = U1001`, `ci
 |---|---|---|
 | `user_id` | TEXT, **khoá chính** | T là ai; mỗi người đúng một dòng |
 | `city_code` | TEXT, cho phép NULL | thành phố hiện tại (`HCM`, `HN`…); NULL = chưa có/đã xoá |
+| `birth_date` | DATE, cho phép NULL | ngày sinh; tuổi tính ở silver theo `ds` (không lưu tuổi vì bị cũ theo thời gian) |
+| `gender` | TEXT, `M`/`F`/`O`, cho phép NULL | giới tính; NULL = chưa khai báo |
 | `created_at` | TIMESTAMPTZ | lúc tạo hồ sơ |
 | `updated_at` | TIMESTAMPTZ | lần sửa gần nhất |
 
-Vision dùng để: attribute `user_city` (`MUTEX` + `STATE`).
+Vision dùng để: attribute `user_city` (`MUTEX` + `STATE`) — attribute đầu tiên. `gender` (`MUTEX` `STATE`) và `age_band` (nhãn 18–24, 25–34… tính từ `birth_date` ở silver như derived attribute, đi vào như `STATE`) là ứng viên tiếp theo cùng nguồn, chọn ở bước 5.
 
 ### 1.2 T mở thêm dịch vụ → `user_product` (sổ sản phẩm đang dùng)
 

@@ -26,6 +26,15 @@ def test_users_do_not_clash_with_examples() -> None:
     assert all(not u.startswith("U") for u in g.user_ids(5))
 
 
+# birth_date nằm trong 1960..2008, gender thuộc M/F/O hoặc NULL (chưa khai báo); SQL in ra dùng NULL, không phải 'None'.
+def test_profile_birth_date_and_gender() -> None:
+    inserts, _, _ = g.gen_profile(g.Config(users=400, days=5))
+    assert all(dt.date(1960, 1, 1) <= r[2] <= dt.date(2008, 12, 31) for r in inserts)
+    assert {r[3] for r in inserts} == {"M", "F", "O", None}
+    sql = "\n".join(g.render(g.Config(users=400, days=5)))
+    assert "'None'" not in sql and "NULL" in sql
+
+
 # Bảng trạng thái: user đổi city phải sang city KHÁC, user mất city không đồng thời bị update.
 def test_state_edge_cases() -> None:
     cfg = g.Config(users=500, days=10)

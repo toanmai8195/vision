@@ -12,12 +12,12 @@ BEGIN;
 
 -- S2a Profile (§2.1): phát lại đúng chuỗi thay đổi.
 DELETE FROM src.user_profile WHERE user_id IN ('U1001', 'U1002', 'U1003');
-INSERT INTO src.user_profile (user_id, city_code, created_at, updated_at) VALUES
-  ('U1003', 'HN',  '2024-06-01T00:00:00Z', '2024-06-01T00:00:00Z'),   -- không đổi từ lâu
-  ('U1001', 'HCM', '2025-01-10T00:00:00Z', '2025-01-10T00:00:00Z');
+INSERT INTO src.user_profile (user_id, city_code, birth_date, gender, created_at, updated_at) VALUES
+  ('U1003', 'HN',  '1985-02-14', NULL, '2024-06-01T00:00:00Z', '2024-06-01T00:00:00Z'),   -- không đổi từ lâu; chưa khai báo giới tính
+  ('U1001', 'HCM', '1990-05-20', 'F',  '2025-01-10T00:00:00Z', '2025-01-10T00:00:00Z');
 UPDATE src.user_profile SET city_code = 'HN', updated_at = '2026-09-15T03:00:00Z'   -- đổi giá trị (ts_ms 1789441200000)
  WHERE user_id = 'U1001';
-INSERT INTO src.user_profile (user_id, city_code, created_at, updated_at) VALUES
-  ('U1002', 'HCM', '2026-09-15T04:00:00Z', '2026-09-15T04:00:00Z');   -- user mới (ts_ms 1789444800000)
+INSERT INTO src.user_profile (user_id, city_code, birth_date, gender, created_at, updated_at) VALUES
+  ('U1002', 'HCM', '2001-11-03', 'M',  '2026-09-15T04:00:00Z', '2026-09-15T04:00:00Z');   -- user mới (ts_ms 1789444800000)
 
 COMMIT;
