@@ -13,7 +13,7 @@
 > Hai chiều cấu hình trực giao với loại dữ liệu: **`aggFunc`** (hàm aggregate của `PARTIAL_VALUE(_BY_TAG)`, §3.2.1) và **`attributeType`** `STANDARD`/`EXTENDED` (tag khai báo sẵn hay chuỗi tự do cardinality cao, §3.6).
 >
 > Tài liệu chi tiết (đọc khi cần, không nạp mặc định):
-> - `com/tm/docs/data-types.md` — giải thích trực quan 4 loại dữ liệu, ví dụ timeline, cách chọn loại cho attribute mới
+> - `com/tm/docs/data-types.md` — giải thích trực quan loại dữ liệu theo nguồn hiện có (hiện `MUTEX` + `STATE`, bổ sung khi thêm nguồn), cách chọn loại cho attribute mới
 > - `com/tm/docs/data-flow-examples.md` — dữ liệu qua từng layer, ví dụ input/output đầy đủ (= golden test)
 > - `com/tm/docs/capacity.md` — ước lượng quy mô, chi phí, rủi ro
 > - `com/tm/docs/phases.md` — tổng quan kế hoạch theo layer (bước 0–10)

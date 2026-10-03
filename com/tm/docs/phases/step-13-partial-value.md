@@ -14,6 +14,7 @@ silver.payment_txn (amount DECIMAL(27,6)) ──▶ pv_daily (AGG theo aggFunc) 
 
 - Thiết kế: `CLAUDE.md` §3.5 (cột loại này), §4; ví dụ/golden: `data-flow-examples.md`; cách chọn loại: `data-types.md`.
 - Test theo `CLAUDE.md` §11: parametrize loại mới, có ca REMOVE/late data khi áp dụng; loại đã làm trước đó **không được hồi quy**.
+- Bổ sung phần giải thích loại mới vào `data-types.md` (bảng "Sẽ bổ sung khi có nguồn" ở cuối file).
 - Chỉ **done** khi chạy đúng ở mọi layer đã có (bronze → activation).
 
 Checklist: xem mục "Bước 13" trong `../checklist.md`.

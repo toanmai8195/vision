@@ -1,208 +1,122 @@
-# Bốn loại dữ liệu: MUTEX · NOT_MUTEX · PARTIAL_VALUE · PARTIAL_VALUE_BY_TAG
+# Loại dữ liệu — theo nguồn hiện có: MUTEX + STATE
 
 > Giải thích trực quan cho `CLAUDE.md` §3.2. Định nghĩa hình thức và công thức ở `CLAUDE.md` §3–§4.
-> Mọi ví dụ tính tại **15/09**: A1 = 15/09 · A7 = 09/09→15/09 · A30 = 17/08→15/09.
+> Ví dụ tính tại **15/09/2026** (dữ liệu golden `data-flow-examples.md` §2.1): A1 = 15/09 · A7 = 09/09→15/09 · A30 = 17/08→15/09.
+>
+> **Phạm vi hiện tại: chỉ nguồn `user_profile` → loại `MUTEX` + `STATE`.** Tài liệu chỉ giải thích những gì nguồn này dùng tới. Khi thêm nguồn ở bước 11–16 (`checklist.md`) thì bổ sung loại tương ứng vào đây (bảng ở cuối). Định nghĩa đầy đủ cả 4 loại vẫn ở `CLAUDE.md` §3.2; bản giải thích đầy đủ cũ (đủ 4 loại, `aggFunc`, `EXTENDED`) có trong git, commit `f07750a`.
 
-> Phạm vi triển khai hiện tại chỉ có `MUTEX` + `STATE` (`user_city`); tài liệu này mô tả đủ 4 loại để thiết kế không phải đổi khi mở rộng.
-
-Cả bốn loại cùng trả lời một câu hỏi: **user X có thuộc tag T trong khoảng ngày W không?**
-Khác nhau ở **dữ liệu đưa vào** và **cách gom dữ liệu trong khoảng ngày**.
-
-| Dữ liệu vào | Loại |
-|---|---|
-| **Nhãn**: "gắn tag này" (ADD) / "gỡ tag này" (REMOVE) | MUTEX, NOT_MUTEX |
-| **Con số**: vd số tiền giao dịch (kèm tag nhóm nếu BY_TAG) | PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG |
+Mọi loại cùng trả lời một câu hỏi: **user X có thuộc tag T trong khoảng ngày W không?**
+Khác nhau ở **dữ liệu đưa vào** và **cách gom dữ liệu trong khoảng ngày**. Nguồn hiện tại đưa vào **nhãn** ("user ở thành phố X", "giới tính Y") nên chỉ dùng nhóm nhãn.
 
 ---
 
-## 1. MUTEX — mỗi lúc chỉ một giá trị
+## 1. Nguồn hiện có: `user_profile`
+
+Bảng `src.user_profile`, 1 dòng/user, có sửa/xoá, đi qua CDC (`problem.md` §1.1):
+
+| Cột | Ý nghĩa | Dùng làm |
+|---|---|---|
+| `city_code` | thành phố hiện tại (HCM, HN…); NULL = chưa có/đã xoá | attribute `user_city` |
+| `gender` | M / F / O; NULL = chưa khai báo | ứng viên `gender` |
+| `birth_date` | ngày sinh | ứng viên `age_band` (nhãn tuổi tính ở silver) |
+
+Dữ liệu ví dụ:
+
+| User | Diễn biến |
+|---|---|
+| U1001 (uidx 1) | HCM từ 10/01/2025, **đổi sang HN** ngày 15/09 |
+| U1002 (uidx 2) | user mới, vào ngày 15/09 với HCM |
+| U1003 (uidx 3) | HN từ 2024, **không đổi** |
+
+Cả ba thuộc nhóm **"một người chỉ có một giá trị tại một thời điểm"** → `MUTEX`. Và đây là **trạng thái đang có** (không phải sự kiện) → `STATE`.
+
+---
+
+## 2. MUTEX — mỗi lúc chỉ một giá trị
 
 Tag loại trừ nhau: tại một thời điểm user có **tối đa 1 tag**. Gắn tag mới = thay tag cũ.
-Ví dụ: `churn_score_band` (low/mid/high), `user_city`, `age_band`.
+Ví dụ ở nguồn này: `user_city` (hcm / hn / …), `gender` (m / f / o), `age_band`.
 
-**User An:**
-```
-01/09  ADD high
-09/09  ADD low
-12/09  ADD mid
-```
+**Luật:** trong khoảng ngày, lấy **lần ADD gần nhất**; nếu tag đó bị REMOVE sau lần ADD → không thuộc tag nào (và **không quay lại tag cũ**).
 
-**Luật:** trong khoảng ngày, lấy **lần ADD gần nhất**; nếu tag đó bị REMOVE sau lần ADD → không thuộc tag nào.
+Với `user_city`, thay đổi ở OLTP được hiểu như sau:
 
-| Khoảng ngày | ADD trong khoảng | ADD gần nhất | An thuộc |
+| Thay đổi ở OLTP | Với `user_city` |
+|---|---|
+| user mới / đổi city sang giá trị X | ADD tag X (tag cũ tự bị thay) |
+| `city_code` thành NULL, hoặc xoá dòng | REMOVE → không thuộc tag nào |
+
+**U1001** đổi city: ADD `hcm` (từ 2025) → ADD `hn` (15/09).
+
+| Khoảng ngày | ADD trong khoảng | ADD gần nhất | U1001 thuộc |
 |---|---|---|---|
-| A1 | không có | — | không tag nào |
-| A7 | low (09), mid (12) | mid | **mid** |
-| A30 | high, low, mid | mid | **mid** |
-| Custom 01→10 | high (01), low (09) | low | **low** |
+| A1 | hn (15/09) | hn | **hn** |
+| A7 | hn (15/09) | hn | **hn** |
+| Custom 01/09 → 10/09 | không có ADD mới (hcm từ 2025) | — | xem mục STATE bên dưới |
 
-- Không lấy "gần nhất" thì trong A7 An thuộc cả `low` và `mid` → vô lý.
-- Thêm `13/09 REMOVE mid` → A7: **không thuộc tag nào**. **Không quay lại `low`**.
+Không lấy "gần nhất" thì U1001 thuộc cả `hcm` và `hn` → vô lý.
 
----
-
-## 2. NOT_MUTEX — nhiều tag cùng lúc, mỗi tag độc lập
-
-Như một checklist: gắn/gỡ tag này không ảnh hưởng tag khác.
-Ví dụ: `product_holding` (paylater/insurance/savings), `txn_category` (fnb/travel/bill).
-
-**User Bình:**
-```
-03/09  ADD paylater
-10/09  ADD insurance
-12/09  REMOVE paylater
-14/09  ADD savings
-```
-
-**Luật:** xét **từng tag riêng** — trong khoảng ngày, tín hiệu gần nhất của tag đó là ADD → có tag.
-
-| Khoảng ngày | paylater | insurance | savings | Bình thuộc |
-|---|---|---|---|---|
-| A7 | REMOVE (12) ❌ | ADD (10) ✅ | ADD (14) ✅ | **insurance, savings** |
-| A30 | REMOVE cuối ❌ | ✅ | ✅ | **insurance, savings** |
-| Custom 01→05 | ADD (03) ✅ | — | — | **paylater** |
-
-**Khai báo sai loại → segment sai.** Cùng chuỗi trên nếu coi là MUTEX: A7 lấy ADD gần nhất = savings → Bình chỉ có **savings**, mất insurance dù vẫn đang có bảo hiểm.
-Câu hỏi quyết định: *"Một người có thể có 2 giá trị cùng lúc không?"*
+**Câu hỏi quyết định chọn MUTEX:** *"Một người có thể có 2 giá trị cùng lúc không?"* — Một người chỉ ở một thành phố, một giới tính → không → `MUTEX`.
 
 ---
 
-## Chú ý chung cho MUTEX/NOT_MUTEX: EVENT hay STATE
+## 3. STATE — trạng thái đang có (khác EVENT)
 
-Bảng của Bình ở **A1 cho kết quả rỗng** (15/09 không có tín hiệu), dù Bình vẫn đang giữ insurance, savings.
-Luật "chỉ nhìn tín hiệu trong khoảng" hợp với **sự kiện** ("7 ngày qua có mua F&B?") nhưng không hợp với **trạng thái** ("đang ở đâu", "đang có sản phẩm gì").
+`EVENT` chỉ nhìn **tín hiệu xảy ra trong khoảng ngày**. Hợp với sự kiện ("7 ngày qua có mua F&B?") nhưng **sai với trạng thái** ("đang ở đâu").
+
+**Thử coi `user_city` là EVENT** (chỉ có tín hiệu khi city đổi):
+
+| Khoảng ngày | U1001 | U1002 | **U1003** |
+|---|---|---|---|
+| A7 | hn | hcm | **không thuộc tag nào** |
+| A30 | hn | hcm | **không thuộc tag nào** |
+
+U1003 ở HN từ 2024, không có thay đổi nào trong 30 ngày → không có tín hiệu → mất khỏi `hn`. Sai: U1003 vẫn đang ở HN.
+
+**`STATE`** sửa điều này: trạng thái hiện tại **được coi là ADD lại mỗi ngày**, nên mọi khoảng ngày kết thúc ở `ds` đều bằng trạng thái hiện tại; mất giá trị = REMOVE.
+
+| Khoảng ngày | hcm | hn |
+|---|---|---|
+| A1, A7, A30, …, ALWAYS_ACTIVE | {U1002} | {U1001, U1003} |
+
+(Cùng kết quả `{2}` và `{1,3}` ở `data-flow-examples.md` §2.1.)
 
 | feedMode | Dùng cho | Kết quả |
 |---|---|---|
-| `EVENT` | sự kiện đã xảy ra | tính như các bảng trên |
-| `STATE` | trạng thái đang có | trạng thái hiện tại coi như được ADD lại mỗi ngày → mọi khoảng ngày = trạng thái hiện tại (Bình: insurance, savings) |
+| `EVENT` | sự kiện đã xảy ra | chỉ tín hiệu trong khoảng ngày |
+| `STATE` | trạng thái đang có (city, giới tính, tuổi) | mọi khoảng ngày = trạng thái hiện tại |
+
+Window **kết thúc trước hôm nay** (custom range lịch sử, vd 01/09→10/09) lấy trạng thái tại ngày kết thúc: ở 10/09 U1001 còn ở `hcm`, U1002 chưa tồn tại, U1003 ở `hn` → hcm = {U1001}, hn = {U1003}.
 
 ---
 
-## 3. PARTIAL_VALUE — con số, cộng dồn rồi so khoảng giá trị
+## 4. Ứng viên attribute từ `user_profile`
 
-Nguồn gửi **con số**. Hệ thống **cộng các con số trong khoảng ngày**, rồi xem tổng nằm trong `valueRange` nào.
-Ví dụ `txn_amount`, tag = khoảng giá trị: `lt_500k` [0, 500K) · `500k_2m` [500K, 2M) · `gte_2m` [2M, ∞).
-
-**User Chi:**
-```
-01/09  1.500.000
-10/09    300.000
-15/09    200.000
-15/09    100.000
-```
-
-| Khoảng ngày | Khoản trong khoảng | Tổng | Chi thuộc |
+| Attribute | Loại | Tag | Ghi chú |
 |---|---|---|---|
-| A1 | 200K + 100K | 300.000 | **lt_500k** |
-| A7 | 300K + 200K + 100K | 600.000 | **500k_2m** |
-| A30 | cả 4 | 2.100.000 | **gte_2m** |
-| Custom 01→09 | 1.5M | 1.500.000 | **500k_2m** |
+| `user_city` | MUTEX + STATE | hcm, hn, dn, ct… | **attribute đầu tiên** (golden `seg_0001`) |
+| `gender` | MUTEX + STATE | m, f, o | NULL = chưa khai báo → không thuộc tag nào (U1003 ở ví dụ) |
+| `age_band` | MUTEX + STATE | vd 18–24, 25–34, 35–44, 45+ (**đề xuất**, chốt ở bước 5) | derived: tuổi = `datediff(ds, birth_date)` tính ở silver; Debezium phát `birth_date` là số ngày từ 1970 |
 
-- Cùng user, **mỗi khoảng ngày có thể ra tag khác** (tổng thay đổi theo độ dài).
-- Segment có thể **tự đặt ngưỡng** (ad-hoc `valueRange`): "A7 ≥ 1M" → ❌, "A30 ≥ 1M" → ✅.
-- **Không có giao dịch trong khoảng → không thuộc range nào, kể cả `lt_500k`.** Muốn "không giao dịch 7 ngày" → dùng `SUB`.
-
-## 4. PARTIAL_VALUE_BY_TAG — con số tách theo nhóm
-
-Mỗi con số kèm một tag; hệ thống **cộng riêng từng tag**. Condition bắt buộc có `valueRange`.
-
-**User Chi** (có phân loại):
-```
-01/09  travel  1.500.000
-10/09  fnb       300.000
-15/09  fnb       200.000
-15/09  bill      100.000
-```
-
-| Condition | Tổng | Kết quả |
-|---|---|---|
-| fnb, A7, ≥ 500K | 500K | ✅ |
-| bill, A7, ≥ 500K | 100K | ❌ |
-| travel, A7, ≥ 1M | không có giao dịch | ❌ |
-| travel, A30, ≥ 1M | 1.5M | ✅ |
+`age_band` ví dụ tại 15/09/2026: U1001 (sinh 20/05/1990, 36 tuổi) → 35–44; U1002 (sinh 03/11/2001, 24 tuổi) → 18–24; U1003 (sinh 14/02/1985, 41 tuổi) → 35–44. Ngày 03/11/2026 U1002 tròn 25 tuổi: tag `18–24` REMOVED, `25–34` ADDED mà **không có thay đổi nào ở OLTP** — vì band tính theo `ds` ở silver.
 
 ---
 
-## 5. `aggFunc` — cách gom con số (PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG)
+## 5. Chọn loại khi tạo attribute mới (phần áp dụng hiện tại)
 
-Mặc định cộng dồn (`SUM`). Attribute có thể chọn một hàm khác, miễn là ghép được qua các đoạn ngày (§3.2.1 `CLAUDE.md`).
+1. Dữ liệu là **nhãn** (không phải con số cần cộng dồn)? → nhóm `MUTEX` / `NOT_MUTEX`.
+2. **Một người có thể có 2 giá trị cùng lúc không?** Không → `MUTEX`. (Có → `NOT_MUTEX`, chưa có nguồn nào dùng.)
+3. Nhãn là **trạng thái đang có** hay **sự kiện đã xảy ra**? Trạng thái → `STATE`; sự kiện → `EVENT`.
+4. Giá trị suy ra từ cột khác (tuổi từ ngày sinh, band từ số) → tính ở silver như derived attribute, vào như `STATE`.
 
-**User Chi** (như §3):
-```
-01/09  1.500.000
-10/09    300.000
-15/09    200.000
-15/09    100.000
-```
+## 6. Sẽ bổ sung khi có nguồn
 
-| aggFunc | A1 | A7 | A30 | Custom 01→09 | Condition ví dụ |
-|---|---|---|---|---|---|
-| `SUM` | 300K | 600K | 2.1M | 1.5M | tổng A7 ≥ 500K ✅ |
-| `COUNT` | 2 | 3 | 4 | 1 | số giao dịch A7 ≥ 3 ✅; A1 ≥ 3 ❌ |
-| `MIN` | 100K | 100K | 100K | 1.5M | giao dịch nhỏ nhất A7 < 150K ✅ |
-| `MAX` | 200K | 300K | 1.5M | 1.5M | giao dịch lớn nhất A30 ≥ 1M ✅; A7 ≥ 1M ❌ |
-
-- Mỗi attribute **một** hàm. Muốn cả "tổng" và "số lần" → 2 attribute (`txn_amount` SUM, `txn_count` COUNT).
-- Với BY_TAG: gom **riêng từng tag**. Chi theo ngành hàng, `COUNT`: fnb A7 = 2 → "fnb A7 ≥ 2 lần" ✅, bill A7 = 1 → ❌.
-- Không có event → không thuộc range nào, với mọi hàm.
-- Chưa hỗ trợ: `AVG` (dùng 2 attribute SUM + COUNT), `DISTINCT_COUNT`, `FIRST`/`LAST`.
-
-## 6. `EXTENDED` — tag là chuỗi tự do, số lượng rất lớn
-
-Tag bình thường (`STANDARD`) được khai báo trước trong catalog: city = {hcm, hn}. Có những attribute mà tag **sinh ra liên tục** và không thể khai báo trước: mã Official Account, mã quà, mã campaign. Khi đó attribute là `EXTENDED`:
-- Nguồn gửi chuỗi bất kỳ (`oa_12345`); hệ thống tự cấp số (`tag_id`) qua dictionary, không cần khai báo.
-- Chỉ tính kết quả theo khoảng ngày cho những tag **đang được segment dùng**. Tag không ai dùng → không tốn chi phí.
-- Hỗ trợ cho `NOT_MUTEX` (EVENT / STATE) và `PARTIAL_VALUE_BY_TAG`. `MUTEX` và `PARTIAL_VALUE` không hỗ trợ.
-
-**Follow OA** (`oa_follow`, NOT_MUTEX EVENT, EXTENDED):
-```
-02/09  User 1  follow   oa_12345
-10/09  User 2  follow   oa_12345, oa_777
-13/09  User 1  unfollow oa_12345
-14/09  User 3  follow   oa_999
-```
-Segment đang dùng: `oa_12345` với A7, A30; `oa_777` với A30.
-
-| Condition | Tính thế nào | Kết quả |
-|---|---|---|
-| oa_12345, A7 | đã tính sẵn | {2} (User 1 unfollow 13/09) |
-| oa_12345 AND oa_777, A30 | đã tính sẵn | {2} |
-| oa_999, A7 | **chưa tính sẵn** → tính ngay (on-demand), ghi nhận để từ hôm sau tính sẵn | {3} |
-| oa_never_seen, A7 | chuỗi chưa từng xuất hiện | {} (không lỗi) |
-
-**Giá trị quà** (`gift_value`, PARTIAL_VALUE_BY_TAG SUM, EXTENDED):
-```
-10/09  User 1  gift_abc   50.000
-14/09  User 1  gift_abc   70.000
-15/09  User 2  gift_abc   30.000
-15/09  User 2  gift_xyz  200.000
-```
-| Condition | Kết quả |
+| Khi thêm | Bổ sung vào tài liệu này |
 |---|---|
-| gift_abc, A7, ≥ 100K | {1} (120K) |
-| gift_xyz, A7, ≥ 100K | {2} |
-| gift_abc OR gift_xyz, A7, ≥ 100K | {1, 2} |
-
----
-
-## Tóm tắt
-
-| | MUTEX | NOT_MUTEX | PARTIAL_VALUE | PARTIAL_VALUE_BY_TAG |
-|---|---|---|---|---|
-| Dữ liệu vào | ADD/REMOVE tag | ADD/REMOVE tag | con số | con số + tag nhóm |
-| Trong khoảng ngày | ADD gần nhất của cả attribute | từng tag: tín hiệu gần nhất là ADD | SUM → so `valueRange` | SUM từng tag → so `valueRange` |
-| Số tag / user | ≤ 1 | nhiều | ≤ 1 nếu range không chồng nhau | mỗi tag một tổng riêng |
-| Ngưỡng | — | — | tag định sẵn hoặc ad-hoc | luôn ad-hoc trong condition |
-| Ví dụ | city, churn band, age band | sản phẩm đang dùng, loại giao dịch | tổng chi tiêu | chi theo ngành hàng |
-| Lưu trữ | bitmap | bitmap | row `(uidx, agg)` | row `(tag, uidx, agg)` |
-| `aggFunc` | — | — | SUM · COUNT · MIN · MAX | SUM · COUNT · MIN · MAX |
-| Tag EXTENDED | ❌ | ✅ | ❌ | ✅ |
-
-## Chọn loại khi tạo attribute mới
-
-1. Dữ liệu là **con số cần cộng dồn**? → `PARTIAL_VALUE` (cần tách theo nhóm → `PARTIAL_VALUE_BY_TAG`).
-2. Là nhãn: **một người có thể có 2 giá trị cùng lúc?** Không → `MUTEX` · Có → `NOT_MUTEX`.
-3. Nhãn là **trạng thái đang có** hay **sự kiện đã xảy ra**? → `STATE` / `EVENT`.
-4. Con số: cần **tổng, số lần, nhỏ nhất hay lớn nhất**? → `aggFunc`. Là **trạng thái** (số dư, hạn mức)? → không dùng PARTIAL_VALUE, dùng MUTEX `STATE` với bucket.
-5. Tag có **khai báo trước được** không (vài chục – vài nghìn giá trị cố định)? Có → `STANDARD`. Sinh liên tục / không giới hạn (mã OA, mã quà) → `EXTENDED`.
+| Bước 11 — payment, `MUTEX` `EVENT` (`last_txn_category`) | MUTEX với tín hiệu sự kiện, `REMOVE` |
+| Bước 12 — `NOT_MUTEX` `EVENT` (`txn_category`) | nhiều tag cùng lúc, tín hiệu gần nhất của từng tag; khai báo sai loại → segment sai |
+| Bước 13 — `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG`, `aggFunc` | con số, cộng dồn, `valueRange`, SUM/COUNT/MIN/MAX |
+| Bước 14 — product, `NOT_MUTEX` `STATE` | NOT_MUTEX với STATE |
+| Bước 15 — voucher/OA/app, `EXTENDED` | tag chuỗi tự do, tính theo nhu cầu (usage-driven) |
+| Bước 16 — churn file, `MUTEX` `EVENT` + REMOVE | band theo điểm, REMOVE, không quay lại tag cũ |
+| Cuối | bảng tóm tắt so sánh 4 loại, cây chọn loại đầy đủ |

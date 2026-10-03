@@ -405,7 +405,7 @@ POST /v1/segments/seg_1002/exports
 
 ## 7. Mở rộng P1b: `aggFunc` và `EXTENDED`
 
-Ví dụ chi tiết ở `data-types.md` §5–§6; golden: `com/tm/src/temporal/testdata/golden/p1b_aggfunc_extended.yaml`.
+Ví dụ chi tiết (bản cũ, git `f07750a`) ở `data-types.md` §5–§6, sẽ viết lại ở bước 13/15; golden: `com/tm/src/temporal/testdata/golden/p1b_aggfunc_extended.yaml`.
 
 ### 7.1 `pv_daily` theo `aggFunc` (user Chi, ngày 15/09: 200K và 100K)
 
