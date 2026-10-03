@@ -278,9 +278,11 @@ services:
 
   # ===== Bước 4: silver (L2) =====
 
-  # One-shot: PySpark local[*] chạy job silver cho một ngày ICT (DS, mặc định hôm nay ICT): bronze.user_profile_cdc_raw ->
-  # silver.user_profile_cdc_events + silver.user_profile_cdc_dlq. Chạy lại cùng DS ra cùng kết quả (idempotent).
-  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/batch/silver:silver_user_profile_docker
+  # One-shot: PySpark local[*] chạy chuỗi job silver của user_profile cho một ngày ICT (DS, mặc định hôm nay ICT):
+  #   1. bronze.user_profile_cdc_raw -> silver.user_profile_cdc_events + silver.user_profile_cdc_dlq
+  #   2. silver.user_profile_cdc_events -> silver.user_profile_scd2 (dựng lại as-of DS)
+  # Chạy lại cùng DS ra cùng kết quả (idempotent). Image build bằng Bazel:
+  #   bazel run --config=linux-arm64 //com/tm/src/batch/silver:silver_user_profile_docker
   # Chạy: DS=2026-10-03 docker compose -f <file> --profile silver run --rm spark-silver-user-profile
   spark-silver-user-profile:
     image: com.tm.spark.silver_user_profile:v1.0.0
@@ -295,8 +297,11 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        exec /opt/spark/bin/spark-submit --master 'local[*]' --driver-memory 1g \
-          /app/com/tm/src/batch/silver/user_profile_events.py $${DS:+--ds $$DS}
+        set -e
+        for job in user_profile_events user_profile_scd2; do
+          /opt/spark/bin/spark-submit --master 'local[*]' --driver-memory 1g \
+            /app/com/tm/src/batch/silver/$$job.py $${DS:+--ds $$DS}
+        done
 
   # StarRocks (allin1: FE + BE) để xem bảng Iceberg bằng SQL/DBeaver (giao thức MySQL, user root, không mật khẩu).
   # Bật: docker compose --profile query up -d. Image ~8GB. Bước 5 sẽ dùng lại service này làm gold.
