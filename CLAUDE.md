@@ -380,7 +380,7 @@ vision/
 └── com/tm/
     ├── proto/vision/{segment,catalog,event}/v1/
     ├── src/
-    │   ├── ingest/{oltp(seed+DDL),cdc(debezium,flink Java),loader(Py)}/
+    │   ├── ingest/{oltp(seed+DDL, generate.py, generator Go live),cdc(debezium,flink Java),loader(Py)}/
     │   ├── batch/{silver,dictionary}/            # PySpark
     │   ├── sql/starrocks/{ddl,daily,dq}/
     │   ├── temporal/                             # model, blocks, latest, ranges, planner, engine, reference, testdata/golden

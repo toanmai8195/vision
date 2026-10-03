@@ -61,6 +61,23 @@ services:
       - ../../src/ingest/oltp:/seed:ro
     entrypoint: ["bash", "-c", "pip install -q --disable-pip-version-check 'psycopg[binary]==3.2.9' && python /seed/generate.py $$GENERATE_ARGS"]
 
+  # Generator live: mỗi giây một thao tác ngẫu nhiên lên src.user_profile (đổi city/giới tính, thêm/xoá user L…),
+  # để có luồng CDC liên tục. Chỉ đụng user `L…`, không đụng user seed. Bật: docker compose --profile live up -d
+  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/ingest/oltp/generator:oltp_generator_docker
+  oltp-generator:
+    image: com.tm.go.oltp_generator:v1.0.0
+    pull_policy: never
+    container_name: vision-oltp-generator
+    profiles: ["live"]
+    depends_on:
+      oltp-seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      PG_DSN: postgres://vision:vision@postgres-oltp:5432/oltp
+      RATE_PER_SEC: "1"
+      MAX_USERS: "10000"
+
   # ===== Bước 3: ingest OLTP -> bronze (L1) =====
 
   # Kafka KRaft 1 node. Trong compose dùng kafka:9092; từ host dùng localhost:29092.

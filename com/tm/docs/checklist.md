@@ -29,6 +29,7 @@ Quy ước:
 - [x] Schema OLTP cho từng nguồn (bảng, cột, kiểu, khoá, cột thời gian) theo bài toán ở bước 1
 - [x] Seed data khớp ví dụ bước 1, gồm cả ca biên (trùng, đến muộn, xoá/đổi giá trị)
 - [x] Script seed chạy lại được; có cách sinh thêm data để test lớn hơn
+- [x] Generator live (Go + image OCI, `com/tm/src/ingest/oltp/generator`): mỗi giây 1 thao tác lên `user_profile`, bật bằng profile `live` của compose
 - [x] Done khi: query OLTP ra đúng data của ví dụ ở bước 1.
 
 ## Bước 3 — Bronze (L1, OLAP)  ([chi tiết](phases/step-03-bronze.md))
@@ -71,7 +72,7 @@ Quy ước:
 
 ## Bước 8 — Segment (L6)  ([chi tiết](phases/step-08-segment.md))
 > Mục tiêu: từ DSL ra bitmap segment.
-- [ ] Go + Kotlin trên Bazel: rules_go + gazelle + `go.mod`; rules_kotlin + `maven_install.json` + Dagger; macro `com_tm_go_image`, `com_tm_kt_image`; mỗi ngôn ngữ 1 test mẫu xanh
+- [ ] Kotlin trên Bazel: rules_kotlin + `maven_install.json` + Dagger; macro `com_tm_kt_image`; 1 test mẫu xanh (Go đã dựng ở bước 2)
 - [ ] Proto `segment` (DSL)
 - [ ] Bitmap codec (Go + Kotlin), golden bytes lấy từ StarRocks thật
 - [ ] `segment-manager` (Kotlin): CRUD, validate DSL, estimate

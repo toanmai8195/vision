@@ -7,6 +7,10 @@ build --strategy=CopyToDirectory=local
 build --strategy=CopyFile=local
 build --repo_env=DOCKER_CONFIG=/dev/null
 
+# Go thuần, không CGO (image distroless)
+build --@rules_go//go/config:pure
+build --action_env=CGO_ENABLED=0
+
 # Java 17 (Flink 1.20 hỗ trợ chính thức)
 build --java_language_version=17
 build --java_runtime_version=remotejdk_17
