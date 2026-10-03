@@ -1,7 +1,8 @@
 """Silver (L2), bước 2: silver.user_profile_cdc_events -> silver.user_profile_scd2 (SCD2 mức ngày).
 
 Input : `vision.silver.user_profile_cdc_events` (job user_profile_events.py).
-Output: `vision.silver.user_profile_scd2`: user_id, city_code, birth_date, gender, valid_from, valid_to, is_current.
+Output: `vision.silver.user_profile_scd2`: user_id, uidx, city_code, birth_date, gender, valid_from, valid_to, is_current
+        (uidx join từ silver.user_dict, nên job user_dict.py phải chạy trước).
 
 Quy tắc (xem docs/phases/step-04-silver.md)
 - Mức NGÀY: trạng thái của user trong ngày `ds` = event cuối ngày theo (source_ts_ms, kafka_partition, kafka_offset);
@@ -24,6 +25,7 @@ from typing import Optional, Sequence
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
+from com.tm.src.batch.silver.user_dict import USER_DICT
 from com.tm.src.batch.silver.user_profile_events import EVENTS, build_session
 
 SCD2 = "vision.silver.user_profile_scd2"
@@ -31,7 +33,7 @@ OPEN_END = "9999-12-31"
 
 SCD2_DDL = """
 CREATE TABLE IF NOT EXISTS {table} (
-  user_id STRING, city_code STRING, birth_date DATE, gender STRING,
+  user_id STRING, uidx INT, city_code STRING, birth_date DATE, gender STRING,
   valid_from DATE, valid_to DATE, is_current BOOLEAN
 ) USING iceberg
 """
@@ -73,11 +75,28 @@ def build_scd2(events: DataFrame, as_of: Optional[str] = None) -> DataFrame:
     )
 
 
+def with_uidx(scd2: DataFrame, user_dict: DataFrame) -> DataFrame:
+    """Thêm cột `uidx` (join dictionary theo user_id). Ném ValueError nếu có user chưa có trong dictionary
+    (job dictionary phải chạy trước)."""
+    out = scd2.join(user_dict.select("user_id", "uidx"), "user_id", "left")
+    missing = out.filter(F.col("uidx").isNull()).select("user_id").distinct().limit(5).collect()
+    if missing:
+        raise ValueError("user chưa có trong silver.user_dict (chạy user_dict.py trước): %s" % [r.user_id for r in missing])
+    return out.select("user_id", "uidx", "city_code", "birth_date", "gender", "valid_from", "valid_to", "is_current")
+
+
+def _ensure_uidx_column(spark: SparkSession) -> None:
+    """Bảng tạo từ bản cũ chưa có `uidx` thì thêm cột (Iceberg schema evolution); ghi sau đó theo tên cột."""
+    if "uidx" not in spark.table(SCD2).columns:
+        spark.sql("ALTER TABLE %s ADD COLUMNS (uidx INT)" % SCD2)
+
+
 def run(spark: SparkSession, ds: str) -> int:
-    """Dựng lại SCD2 as-of `ds` và ghi đè cả bảng. Trả về số version."""
+    """Dựng lại SCD2 as-of `ds` (kèm uidx) và ghi đè cả bảng. Trả về số version."""
     spark.sql("CREATE NAMESPACE IF NOT EXISTS vision.silver")
     spark.sql(SCD2_DDL.format(table=SCD2))
-    scd2 = build_scd2(spark.table(EVENTS), ds).cache()
+    _ensure_uidx_column(spark)
+    scd2 = with_uidx(build_scd2(spark.table(EVENTS), ds), spark.table(USER_DICT)).cache()
     n = scd2.count()
     scd2.writeTo(SCD2).overwrite(F.lit(True))
     return n

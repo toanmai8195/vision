@@ -134,6 +134,17 @@ class Scd2Test(unittest.TestCase):
         rows = [("U1", "r", (2026, 9, 1), "HCM", None, None), ("U1", "u", (2026, 9, 5), "HN", None, None)]
         self.assertEqual(self.versions(rows, as_of="2026-09-04"), [("U1", D(2026, 9, 1), OPEN, "HCM", None, None, True)])
 
+    def test_with_uidx_adds_dictionary_id_and_rejects_unknown_users(self):
+        rows = [("U1", "r", (2026, 9, 1), "A", None, None), ("U1", "u", (2026, 9, 2), "B", None, None),
+                ("U2", "r", (2026, 9, 1), "A", None, None)]
+        scd2 = m.build_scd2(self.events(rows))
+        dic = self.spark.createDataFrame([("U1", 7), ("U2", 8)], "user_id string, uidx int")
+        got = sorted((r.user_id, r.uidx, r.valid_from) for r in m.with_uidx(scd2, dic).collect())
+        self.assertEqual(got, [("U1", 7, D(2026, 9, 1)), ("U1", 7, D(2026, 9, 2)), ("U2", 8, D(2026, 9, 1))])
+        self.assertEqual(m.with_uidx(scd2, dic).columns[:2], ["user_id", "uidx"])
+        with self.assertRaises(ValueError):                       # U2 chưa có trong dictionary
+            m.with_uidx(scd2, dic.filter("user_id = 'U1'")).collect()
+
     def test_versions_of_a_user_are_contiguous_and_one_current(self):
         rows = [("U1", "r", (2026, 9, 1), "A", None, None), ("U1", "u", (2026, 9, 2), "B", None, None),
                 ("U1", "u", (2026, 9, 3), "C", None, None), ("U2", "r", (2026, 9, 1), "A", None, None)]

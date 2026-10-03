@@ -4,6 +4,8 @@ load("@tar.bzl", "tar")
 exports_files([
     "user_profile_events.py",
     "user_profile_events_test.py",
+    "user_dict.py",
+    "user_dict_test.py",
     "user_profile_scd2.py",
     "user_profile_scd2_test.py",
 ])
@@ -35,6 +37,8 @@ tar(
     srcs = [
         "user_profile_events.py",
         "user_profile_events_test.py",
+        "user_dict.py",
+        "user_dict_test.py",
         "user_profile_scd2.py",
         "user_profile_scd2_test.py",
     ],
@@ -42,6 +46,8 @@ tar(
     mtree = [
         "./app/com/tm/src/batch/silver/user_profile_events.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_events.py)",
         "./app/com/tm/src/batch/silver/user_profile_events_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_events_test.py)",
+        "./app/com/tm/src/batch/silver/user_dict.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_dict.py)",
+        "./app/com/tm/src/batch/silver/user_dict_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_dict_test.py)",
         "./app/com/tm/src/batch/silver/user_profile_scd2.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_scd2.py)",
         "./app/com/tm/src/batch/silver/user_profile_scd2_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_scd2_test.py)",
         "./app/com/__init__.py uid=0 gid=0 mode=0644 type=file contents=",

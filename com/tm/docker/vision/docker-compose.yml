@@ -280,7 +280,8 @@ services:
 
   # One-shot: PySpark local[*] chạy chuỗi job silver của user_profile cho một ngày ICT (DS, mặc định hôm nay ICT):
   #   1. bronze.user_profile_cdc_raw -> silver.user_profile_cdc_events + silver.user_profile_cdc_dlq
-  #   2. silver.user_profile_cdc_events -> silver.user_profile_scd2 (dựng lại as-of DS)
+  #   2. silver.user_profile_cdc_events -> silver.user_dict (thêm user mới, chỉ append uidx)
+  #   3. silver.user_profile_cdc_events + user_dict -> silver.user_profile_scd2 (dựng lại as-of DS, có uidx)
   # Chạy lại cùng DS ra cùng kết quả (idempotent). Image build bằng Bazel:
   #   bazel run --config=linux-arm64 //com/tm/src/batch/silver:silver_user_profile_docker
   # Chạy: DS=2026-10-03 docker compose -f <file> --profile silver run --rm spark-silver-user-profile
@@ -298,7 +299,7 @@ services:
     command:
       - |
         set -e
-        for job in user_profile_events user_profile_scd2; do
+        for job in user_profile_events user_dict user_profile_scd2; do
           /opt/spark/bin/spark-submit --master 'local[*]' --driver-memory 1g \
             /app/com/tm/src/batch/silver/$$job.py $${DS:+--ds $$DS}
         done
