@@ -42,7 +42,7 @@ Quy ước:
 
 ## Bước 4 — Silver (L2)  ([chi tiết](phases/step-04-silver.md))
 > Mục tiêu: dữ liệu sạch, user có `uidx`.
-- [ ] Spark: dedup `event_id`, tính `ds` theo ICT, dòng lỗi vào DLQ
+- [x] Spark (PySpark local, 1 container chạy theo lô): parse bronze CDC `user_profile`, dedup theo vị trí Kafka `(partition, offset)`, tính `ds` theo ICT, dòng lỗi vào DLQ → `silver.user_profile_cdc_events` + `silver.user_profile_cdc_dlq` (dedup `event_id` làm khi có nguồn event, bước 11)
 - [ ] CDC → SCD2 (profile, product)
 - [ ] Dictionary `user_id → uidx` (chỉ append, không tái sử dụng)
 - [ ] Done khi: chạy lại cùng `ds` ra cùng kết quả (idempotent); khớp `data-flow-examples.md`.

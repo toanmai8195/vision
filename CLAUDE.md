@@ -393,7 +393,7 @@ vision/
     └── docs/{data-types.md,data-flow-examples.md,capacity.md,phases.md}
 ```
 
-**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7` · Flink `1.20.2` (Java 17) · Iceberg `1.9.2` · flink-connector-kafka `3.3.0-1.20` · Hadoop client `3.3.6` (jar Flink pin sha256 ở `MODULE.bazel`).
+**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7` · Flink `1.20.2` (Java 17) · Iceberg `1.9.2` · flink-connector-kafka `3.3.0-1.20` · Hadoop client `3.3.6` (jar Flink pin sha256 ở `MODULE.bazel`) · Spark `3.5.6` (image `apache/spark:3.5.6-python3` pin digest) · `iceberg-spark-runtime-3.5_2.12` `1.9.2`.
 - Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (tham khảo thor) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (bước 4).
 - JVM deps: sửa `artifacts` trong `MODULE.bazel` → `bazel run @maven//:pin` (lock `maven_install.json`, `fail_if_repin_required`).
 - Go: `gazelle:map_kind go_binary com_tm_go_image` → gazelle quản lý `go_library`/`go_test`, binary luôn qua macro image.
@@ -473,7 +473,7 @@ docker compose -f com/tm/docker/vision/docker-compose.yml up -d
 
 **Kotlin/Vert.x/Dagger2**: JVM 21; `CoroutineVerticle`, **không block event loop**; một `@Component`/deployable, `@Module` theo concern; constructor injection; client dùng chung `@Singleton`; Router → Handler → Service → Repository.
 
-**Python**: 3.11, type hints, `ruff` + `pytest`; PySpark job có `main(args)` test được với SparkSession local; DAG không import nặng ở top-level.
+**Python**: 3.11 (riêng job PySpark chạy bằng Python 3.8 của image Spark, viết tương thích 3.8), type hints, `ruff` + `pytest`; PySpark job có `main(args)` test được với SparkSession local; DAG không import nặng ở top-level.
 
 **SQL**: một file/bước; template `{{ ds }}`, `{{ attr_id }}`; header ghi input/output + cách idempotent.
 

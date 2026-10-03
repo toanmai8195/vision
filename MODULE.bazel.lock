@@ -241,7 +241,7 @@
     "@@rules_oci+//oci:extensions.bzl%oci": {
       "general": {
         "bzlTransitiveDigest": "94uNScD8fQHN4iINk66lDu7nfRhN9KkUQs0uCLo5qB8=",
-        "usagesDigest": "2YVLMCqzQzvhy8MHfu2ThiRoxgHyPTCUrK7U7iwQS2s=",
+        "usagesDigest": "gPP+k1uUkIKYsISweaT92ol0UeNlS5Ny+nZWUv7k6j8=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -375,6 +375,49 @@
               "reproducible": true
             }
           },
+          "spark_base_linux_amd64": {
+            "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
+            "attributes": {
+              "www_authenticate_challenges": {},
+              "scheme": "https",
+              "registry": "index.docker.io",
+              "repository": "apache/spark",
+              "identifier": "sha256:599722640c8a42ff5ecca329a3faa5371b3bd5c752b320776d5cdd1eed3441ac",
+              "platform": "linux/amd64",
+              "target_name": "spark_base_linux_amd64",
+              "bazel_tags": []
+            }
+          },
+          "spark_base_linux_arm64": {
+            "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
+            "attributes": {
+              "www_authenticate_challenges": {},
+              "scheme": "https",
+              "registry": "index.docker.io",
+              "repository": "apache/spark",
+              "identifier": "sha256:599722640c8a42ff5ecca329a3faa5371b3bd5c752b320776d5cdd1eed3441ac",
+              "platform": "linux/arm64",
+              "target_name": "spark_base_linux_arm64",
+              "bazel_tags": []
+            }
+          },
+          "spark_base": {
+            "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_alias",
+            "attributes": {
+              "target_name": "spark_base",
+              "www_authenticate_challenges": {},
+              "scheme": "https",
+              "registry": "index.docker.io",
+              "repository": "apache/spark",
+              "identifier": "sha256:599722640c8a42ff5ecca329a3faa5371b3bd5c752b320776d5cdd1eed3441ac",
+              "platforms": {
+                "@@platforms//cpu:x86_64": "@spark_base_linux_amd64",
+                "@@platforms//cpu:arm64": "@spark_base_linux_arm64"
+              },
+              "bzlmod_repository": "spark_base",
+              "reproducible": true
+            }
+          },
           "oci_crane_darwin_amd64": {
             "repoRuleId": "@@rules_oci+//oci:repositories.bzl%crane_repositories",
             "attributes": {
@@ -499,7 +542,10 @@
             "distroless_base_linux_arm64_v8",
             "flink_base",
             "flink_base_linux_amd64",
-            "flink_base_linux_arm64_v8"
+            "flink_base_linux_arm64_v8",
+            "spark_base",
+            "spark_base_linux_amd64",
+            "spark_base_linux_arm64"
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",

@@ -109,6 +109,23 @@ use_repo(
     "flink_base_linux_arm64_v8",
 )
 
+# --- Image Spark (job silver PySpark): base apache/spark + jar Iceberg Spark runtime/AWS bundle vào /opt/spark/jars ---
+oci.pull(
+    name = "spark_base",
+    digest = "sha256:599722640c8a42ff5ecca329a3faa5371b3bd5c752b320776d5cdd1eed3441ac",
+    image = "docker.io/apache/spark",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+)
+use_repo(
+    oci,
+    "spark_base",
+    "spark_base_linux_amd64",
+    "spark_base_linux_arm64",
+)
+
 # Jar bổ sung cho Flink (pin sha256), khớp phiên bản compile ở maven.install.
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
@@ -138,4 +155,19 @@ http_file(
     downloaded_file_path = "hadoop-client-runtime-3.3.6.jar",
     sha256 = "15f01bc804294df06d2effc87de363a83cf589f50558bdbf48f72541ad8de854",
     urls = ["https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.6/hadoop-client-runtime-3.3.6.jar"],
+)
+
+http_file(
+    name = "spark_lib_iceberg_spark_runtime",
+    downloaded_file_path = "iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
+    sha256 = "c40ae0a8e2673bb5c01951b7d15aae2224a534f8331f4274ce2082776116a044",
+    urls = ["https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.9.2/iceberg-spark-runtime-3.5_2.12-1.9.2.jar"],
+)
+
+# Cùng file với flink_lib_iceberg_aws_bundle (cùng sha256), khai báo riêng để mỗi image tự đủ.
+http_file(
+    name = "spark_lib_iceberg_aws_bundle",
+    downloaded_file_path = "iceberg-aws-bundle-1.9.2.jar",
+    sha256 = "ea5b6fec1b547e2fe936f804c737943f5ee322d038560f63a8261deb766def1b",
+    urls = ["https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.9.2/iceberg-aws-bundle-1.9.2.jar"],
 )

@@ -1,0 +1,68 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@tar.bzl", "tar")
+
+exports_files([
+    "user_profile_events.py",
+    "user_profile_events_test.py",
+])
+
+# ---------------------------------------------------------------------------
+# Image Spark chạy job silver (PySpark local[*], theo lô):
+#   //com/tm/src/batch/silver:silver_user_profile_image    oci_image
+#   //com/tm/src/batch/silver:silver_user_profile_docker   load vào Docker local: com.tm.spark.silver_user_profile:v1.0.0
+#   bazel run --config=linux-arm64 //com/tm/src/batch/silver:silver_user_profile_docker
+# Base apache/spark (pin digest) + jar Iceberg Spark runtime và AWS bundle (S3FileIO) vào /opt/spark/jars.
+# ---------------------------------------------------------------------------
+
+tar(
+    name = "spark_lib_tar",
+    srcs = [
+        "@spark_lib_iceberg_aws_bundle//file",
+        "@spark_lib_iceberg_spark_runtime//file",
+    ],
+    out = "spark_lib_layer.tar",
+    mtree = [
+        "./opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.9.2.jar uid=0 gid=0 mode=0644 type=file content=$(execpath @spark_lib_iceberg_spark_runtime//file)",
+        "./opt/spark/jars/iceberg-aws-bundle-1.9.2.jar uid=0 gid=0 mode=0644 type=file content=$(execpath @spark_lib_iceberg_aws_bundle//file)",
+    ],
+)
+
+# Source job giữ nguyên đường dẫn package dưới /app để import `com.tm.src.batch.silver...`; __init__ rỗng cho namespace.
+tar(
+    name = "silver_user_profile_tar",
+    srcs = [
+        "user_profile_events.py",
+        "user_profile_events_test.py",
+    ],
+    out = "silver_user_profile_layer.tar",
+    mtree = [
+        "./app/com/tm/src/batch/silver/user_profile_events.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_events.py)",
+        "./app/com/tm/src/batch/silver/user_profile_events_test.py uid=0 gid=0 mode=0644 type=file content=$(execpath user_profile_events_test.py)",
+        "./app/com/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
+        "./app/com/tm/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
+        "./app/com/tm/src/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
+        "./app/com/tm/src/batch/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
+        "./app/com/tm/src/batch/silver/__init__.py uid=0 gid=0 mode=0644 type=file contents=",
+    ],
+)
+
+oci_image(
+    name = "silver_user_profile_image",
+    base = "@spark_base",
+    env = {
+        "PYTHONPATH": "/app:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip",
+        "PYTHONUNBUFFERED": "1",
+    },
+    tars = [
+        ":spark_lib_tar",
+        ":silver_user_profile_tar",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "silver_user_profile_docker",
+    image = ":silver_user_profile_image",
+    repo_tags = ["com.tm.spark.silver_user_profile:v1.0.0"],
+    visibility = ["//visibility:public"],
+)

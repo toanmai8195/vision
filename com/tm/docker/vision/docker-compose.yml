@@ -276,6 +276,28 @@ services:
       - ../../src/ingest/cdc:/cdc:ro
     entrypoint: ["bash", "/cdc/debezium/register.sh"]
 
+  # ===== Bước 4: silver (L2) =====
+
+  # One-shot: PySpark local[*] chạy job silver cho một ngày ICT (DS, mặc định hôm nay ICT): bronze.user_profile_cdc_raw ->
+  # silver.user_profile_cdc_events + silver.user_profile_cdc_dlq. Chạy lại cùng DS ra cùng kết quả (idempotent).
+  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/batch/silver:silver_user_profile_docker
+  # Chạy: DS=2026-10-03 docker compose -f <file> --profile silver run --rm spark-silver-user-profile
+  spark-silver-user-profile:
+    image: com.tm.spark.silver_user_profile:v1.0.0
+    pull_policy: never
+    container_name: vision-spark-silver-user-profile
+    profiles: ["silver"]
+    depends_on:
+      iceberg-rest: { condition: service_healthy }
+    restart: "no"
+    environment:
+      DS: ${DS:-}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        exec /opt/spark/bin/spark-submit --master 'local[*]' --driver-memory 1g \
+          /app/com/tm/src/batch/silver/user_profile_events.py $${DS:+--ds $$DS}
+
   # StarRocks (allin1: FE + BE) để xem bảng Iceberg bằng SQL/DBeaver (giao thức MySQL, user root, không mật khẩu).
   # Bật: docker compose --profile query up -d. Image ~8GB. Bước 5 sẽ dùng lại service này làm gold.
   # DBeaver: StarRocks, localhost:19030, database `ice.bronze`, user root.
