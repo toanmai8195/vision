@@ -37,7 +37,7 @@ Quy ước:
 - [x] Thêm Kafka, Debezium, Flink, MinIO + Iceberg REST vào compose
 - [x] CDC: Debezium đọc log OLTP → Kafka → Flink Java (DataStream) → `bronze.user_profile_cdc_raw` (Iceberg), giữ bản ghi gốc + thời điểm thay đổi + loại thao tác
 - [x] Bảng trạng thái `user_profile` qua CDC (nguồn duy nhất giai đoạn này; payment, product, churn score… thêm ở bước 11–16)
-- [ ] Insert/update/delete ở OLTP sau đó đều xuất hiện trong bronze
+- [x] Insert/update/delete ở OLTP sau đó đều xuất hiện trong bronze (`com/tm/src/ingest/cdc/verify_bronze.sh`)
 - [ ] Done khi: số bản ghi và nội dung bronze khớp OLTP, kể cả sau khi sửa/xoá.
 
 ## Bước 4 — Silver (L2)  ([chi tiết](phases/step-04-silver.md))
