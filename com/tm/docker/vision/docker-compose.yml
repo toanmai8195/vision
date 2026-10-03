@@ -276,6 +276,46 @@ services:
       - ../../src/ingest/cdc:/cdc:ro
     entrypoint: ["bash", "/cdc/debezium/register.sh"]
 
+  # StarRocks (allin1: FE + BE) để xem bảng Iceberg bằng SQL/DBeaver (giao thức MySQL, user root, không mật khẩu).
+  # Bật: docker compose --profile query up -d. Image ~8GB. Bước 5 sẽ dùng lại service này làm gold.
+  # DBeaver: StarRocks, localhost:19030, database `ice.bronze`, user root.
+  starrocks:
+    image: starrocks/allin1-ubuntu:3.5.8
+    container_name: vision-starrocks
+    profiles: ["query"]
+    depends_on:
+      iceberg-rest: { condition: service_healthy }
+    ports: ["19030:9030", "18030:8030"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h127.0.0.1 -P9030 -uroot -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  # One-shot: tạo external catalog `ice` trỏ vào Iceberg REST + MinIO (idempotent).
+  starrocks-init:
+    image: starrocks/allin1-ubuntu:3.5.8
+    container_name: vision-starrocks-init
+    profiles: ["query"]
+    depends_on:
+      starrocks: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mysql -h starrocks -P 9030 -uroot -e "
+        CREATE EXTERNAL CATALOG IF NOT EXISTS ice PROPERTIES (
+          'type' = 'iceberg',
+          'iceberg.catalog.type' = 'rest',
+          'iceberg.catalog.uri' = 'http://iceberg-rest:8181',
+          'iceberg.catalog.warehouse' = 's3://vision-warehouse/',
+          'aws.s3.endpoint' = 'http://minio:9000',
+          'aws.s3.access_key' = 'vision',
+          'aws.s3.secret_key' = 'vision-secret',
+          'aws.s3.enable_path_style_access' = 'true',
+          'aws.s3.region' = 'us-east-1'
+        )"
+
 volumes:
   postgres-oltp-data:
   kafka-data:
