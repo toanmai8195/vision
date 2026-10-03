@@ -3,6 +3,12 @@
 > Định nghĩa gốc ở `CLAUDE.md` §3–§5. Mọi con số ở đây là **golden test** (`com/tm/src/temporal/testdata/golden/`) —
 > đổi semantics thì sửa cả hai. Các kết quả đã được đối chiếu với reference implementation (cách tính ngây thơ theo định nghĩa §3.2).
 
+> **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
+> Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
+> bước 11 S1 payment — raw/silver đủ cột, xử lý `MUTEX` (`last_txn_category`) trước; 12 `NOT_MUTEX`; 13 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`;
+> 14 S2b product → `NOT_MUTEX` `STATE`; 15 S4/S5 → `EXTENDED`; 16 S3 churn file → `MUTEX` `EVENT` + REMOVE (xem `checklist.md`).
+> Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
+
 ## 0. Bối cảnh
 
 As-of `ds = 2026-09-15` (`e = 20711`). Ký hiệu bitmap `{1,2}` = tập `uidx`.
@@ -26,6 +32,69 @@ As-of `ds = 2026-09-15` (`e = 20711`). Ký hiệu bitmap `{1,2}` = tập `uidx`.
 | U1002 | 2 |
 | U1003 | 3 |
 | U1004 | 4 |
+
+---
+
+## 0.1 Luồng hiện tại — 1 nguồn `user_profile` → `user_city` (MUTEX, STATE) → `seg_0001`
+
+Dữ liệu và từng layer của `user_city` ở §2.1 (L0 → L5). Hai bước còn lại:
+
+**L6 Segment** — `seg_0001` "user đang ở HN":
+```json
+{"segmentId": "seg_0001", "rule": {"condition": {"attr": "user_city", "tags": ["hn"], "dateRange": "A7"}}, "schedule": {"type": "DAILY"}, "serving": "ONLINE"}
+```
+`user_city` hn A7 (= `STATE(2026-09-15)`) → **`{1,3}`**, count = 2.
+
+**L7 Activation**: `count(seg_0001) = 2`; `contains(U1003, seg_0001) = true`; `contains(U1002, seg_0001) = false` (U1002 ở HCM); `segments by user U1001` ⊇ `seg_0001`. Mọi response kèm `version` + `asOfDs = 2026-09-15`.
+
+Các mục §3–§7 là đích cuối (cần nguồn/loại chưa làm). §1.0 là bước mở rộng đầu tiên (bước 11).
+
+## 1.0 Mở rộng bước 11 — payment chỉ xử lý MUTEX: `last_txn_category` (MUTEX, EVENT)
+
+Ingest đủ cột: L0 → L2 giống §1 (bronze nguyên văn, `silver.payment_txn` đủ `mcc`, `amount`, `status`). Từ L3 chỉ dùng thông tin MUTEX: `status = SUCCESS`, `mcc → tag`, `event_ts`; **không** dùng `amount`, không tính `txn_category` / `pv_daily`.
+
+Attribute `last_txn_category`: ngành hàng của giao dịch SUCCESS **gần nhất** (mỗi giao dịch là một ADD, không có REMOVE). Tag rule như §1: `5812,5814 → fnb`, `4722 → travel`, `4900 → bill`. Thứ tự trong ngày theo `(event_ts, event_id)`.
+
+**L3 Daily** (`ADD` = ADD cuối ngày của từng user; `ADD(d,0)` = hợp mọi tag):
+
+| ds | ADD fnb | ADD travel | ADD bill | ADD(d,0) | ghi chú |
+|---|---|---|---|---|---|
+| 2026-09-10 | {2} | {} | {} | {2} | e-8001 |
+| 2026-09-14 | {} | {} | {3} | {3} | e-9005 (đến muộn, tính lại ds 09-14) |
+| 2026-09-15 | {2} | {1} | {} | {1,2} | U1001: fnb (03:02Z) rồi travel (05:10Z) → chỉ ADD cuối là travel; U1002: e-9003 (ICT 09-15); e-9004 FAILED bị bỏ |
+
+DEL rỗng mọi ngày.
+
+**L4 Temporal** — `LATEST(d,t) = ADD(d,t) ∪ (LATEST(d−1,t) − ADD(d,0))`:
+
+| ds | LATEST fnb | LATEST travel | LATEST bill |
+|---|---|---|---|
+| 2026-09-10 → 09-13 | {2} | {} | {} |
+| 2026-09-14 | {2} | {} | {3} |
+| 2026-09-15 | **{2}** | **{1}** | **{3}** |
+
+U1001 rời fnb ở 09-15 vì ADD mới (travel) xoá tag cũ.
+
+**L5 Range** — `LATEST(r,t) ∩ SEEN[l,r]`, `SEEN = ⋃ ADD(·,0)`:
+
+| date_range | SEEN | fnb | travel | bill |
+|---|---|---|---|---|
+| A1 | {1,2} | {2} | {1} | {} |
+| A7 | {1,2,3} | {2} | {1} | {3} |
+| A30 | {1,2,3} | {2} | {1} | {3} |
+
+Tag rời nhau trong mỗi window (DQ MUTEX).
+
+**L6 Segment** — `seg_0002` "ở HN, giao dịch gần nhất không phải du lịch":
+```json
+{"segmentId": "seg_0002", "rule": {"operator": "SUB", "children": [
+  {"condition": {"attr": "user_city", "tags": ["hn"], "dateRange": "A7"}},
+  {"condition": {"attr": "last_txn_category", "tags": ["travel"], "dateRange": "A7"}}
+]}}
+```
+`{1,3} − {1} = ` **`{3}`**.
+
+> Các số trên tính tay theo định nghĩa `CLAUDE.md` §3.2 / §4.3; đối chiếu lại bằng `reference.py` khi có (bước 5) trước khi dùng làm golden test.
 
 ---
 
@@ -142,23 +211,30 @@ A7 = `B0[09-09] ⊕ B1[09-10..11] ⊕ B2[09-12..15]`:
 
 **L0 Source** (Debezium):
 ```json
-{"op":"u","source":{"table":"user_profile"},"before":{"user_id":"U1001","city_code":"HCM"},"after":{"user_id":"U1001","city_code":"HN"},"ts_ms":1789441200000}
-{"op":"c","source":{"table":"user_profile"},"before":null,"after":{"user_id":"U1002","city_code":"HCM"},"ts_ms":1789444800000}
+{"op":"u","source":{"table":"user_profile"},"before":{"user_id":"U1001","city_code":"HCM","birth_date":7444,"gender":"F"},"after":{"user_id":"U1001","city_code":"HN","birth_date":7444,"gender":"F"},"ts_ms":1789441200000}
+{"op":"c","source":{"table":"user_profile"},"before":null,"after":{"user_id":"U1002","city_code":"HCM","birth_date":11629,"gender":"M"},"ts_ms":1789444800000}
 ```
 U1003 ở HN từ 2024, không có thay đổi.
 
-**L1 Bronze** — `bronze.user_profile_cdc_raw`: payload nguyên văn + offset.
+**L1 Bronze** — `bronze.user_profile_cdc_raw` (partition `ingest_hour`), mỗi message Kafka một dòng, payload nguyên văn:
+
+| topic | kafka_partition | kafka_offset | msg_key | op | source_ts_ms | cdc_ts_ms | payload |
+|---|---|---|---|---|---|---|---|
+| vision.src.user_profile.v1 | 1 | 41 | `{"user_id":"U1001"}` | u | 1789441200000 | 1789441200123 | `{"op":"u","before":{…HCM},"after":{…HN},…}` |
+| vision.src.user_profile.v1 | 0 | 17 | `{"user_id":"U1002"}` | c | 1789444800000 | 1789444800150 | `{"op":"c","before":null,"after":{…HCM},…}` |
+
+(+ `kafka_ts`, `ingest_ts`, `ingest_hour`.) Xoá dòng ở OLTP → `op = d`, `after = null`. Số dòng bronze ≥ số thay đổi ở OLTP (at-least-once; trùng xử lý ở silver).
 
 **L2 Silver** — `silver.user_profile_scd2` (Spark `MERGE`):
 
-| uidx | city_code | valid_from | valid_to | is_current |
-|---|---|---|---|---|
-| 1 | HCM | 2025-01-10 | 2026-09-15 | false |
-| 1 | HN | 2026-09-15 | 9999-12-31 | true |
-| 2 | HCM | 2026-09-15 | 9999-12-31 | true |
-| 3 | HN | 2024-06-01 | 9999-12-31 | true |
+| uidx | city_code | birth_date | gender | valid_from | valid_to | is_current |
+|---|---|---|---|---|---|---|
+| 1 | HCM | 1990-05-20 | F | 2025-01-10 | 2026-09-15 | false |
+| 1 | HN | 1990-05-20 | F | 2026-09-15 | 9999-12-31 | true |
+| 2 | HCM | 2001-11-03 | M | 2026-09-15 | 9999-12-31 | true |
+| 3 | HN | 1985-02-14 | NULL | 2024-06-01 | 9999-12-31 | true |
 
-U1002 là user mới → cấp `uidx = 2`.
+U1002 là user mới → cấp `uidx = 2`. Một version mới được mở khi **bất kỳ** cột theo dõi (`city_code`, `birth_date`, `gender`) đổi; `user_city` chỉ quan tâm `city_code` nên daily so `city_code` giữa các version liền kề (đổi `gender` mà city giữ nguyên thì không sinh `ADDED/REMOVED` cho `user_city`). Tuổi = `datediff(ds, birth_date)` tính ở silver khi cần `age_band`. Lưu ý L0: Debezium phát `DATE` dưới dạng **số ngày kể từ 1970-01-01** (`7444` = 1990-05-20, `11629` = 2001-11-03), silver phải đổi lại thành date.
 
 **L3 Daily** — `ADDED` = version có `valid_from = ds`, `REMOVED` = version có `valid_to = ds`:
 
@@ -329,7 +405,7 @@ POST /v1/segments/seg_1002/exports
 
 ## 7. Mở rộng P1b: `aggFunc` và `EXTENDED`
 
-Ví dụ chi tiết ở `data-types.md` §5–§6; golden: `com/tm/src/temporal/testdata/golden/p1b_aggfunc_extended.yaml`.
+Ví dụ chi tiết (bản cũ, git `f07750a`) ở `data-types.md` §5–§6, sẽ viết lại ở bước 13/15; golden: `com/tm/src/temporal/testdata/golden/p1b_aggfunc_extended.yaml`.
 
 ### 7.1 `pv_daily` theo `aggFunc` (user Chi, ngày 15/09: 200K và 100K)
 

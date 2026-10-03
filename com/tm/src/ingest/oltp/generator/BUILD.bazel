@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library")
+load("//tools/rules:com_tm_container.bzl", "com_tm_go_image")
+
+go_library(
+    name = "generator_lib",
+    srcs = ["main.go"],
+    importpath = "com.tm/vision/com/tm/src/ingest/oltp/generator",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//com/tm/src/ingest/oltp/generator/internal/ops",
+        "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgxpool",
+    ],
+)
+
+# generator: mỗi giây một thao tác ngẫu nhiên lên src.user_profile, để có luồng CDC liên tục.
+#   bazel run //com/tm/src/ingest/oltp/generator:oltp_generator
+#   bazel run --config=linux-arm64 //com/tm/src/ingest/oltp/generator:oltp_generator_docker
+com_tm_go_image(
+    name = "oltp_generator",
+    package_name = package_name(),
+    embed = [":generator_lib"],
+    visibility = ["//visibility:public"],
+)

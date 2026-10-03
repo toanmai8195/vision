@@ -1,5 +1,5 @@
 # Compose local cho vision. Mỗi bước chỉ thêm service nó cần (xem com/tm/docs/phases/step-00-foundation.md):
-#   2 Postgres OLTP · 3 Kafka/Debezium/Flink/MinIO/Iceberg REST · 4 Spark
+#   2 Postgres OLTP + oltp-seed (+ oltp-generate, profile bigseed) · 3 Kafka/Debezium/Flink/MinIO/Iceberg REST · 4 Spark
 #   5 StarRocks + Postgres meta · 9 Redis · 10 Airflow/Prometheus/Grafana
 name: vision
 
@@ -24,5 +24,321 @@ services:
       timeout: 3s
       retries: 20
 
+  # Bước 2: one-shot, áp schema + nạp data ví dụ golden (chỉ khi chưa có). Chạy xong thoát (Exit 0 là bình thường).
+  # Nạp lại: FORCE_SEED=1 docker compose -f <file> up oltp-seed
+  oltp-seed:
+    image: postgres:16.4
+    container_name: vision-oltp-seed
+    depends_on:
+      postgres-oltp:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGHOST: postgres-oltp
+      PGUSER: vision
+      PGPASSWORD: vision
+      PGDATABASE: oltp
+      FORCE_SEED: ${FORCE_SEED:-0}
+    volumes:
+      - ../../src/ingest/oltp:/seed:ro
+    entrypoint: ["bash", "/seed/init_seed.sh"]
+
+  # Bước 2: sinh thêm data lớn để test, KHÔNG chạy mặc định (profile bigseed). Ví dụ:
+  #   GENERATE_ARGS="--users 10000 --days 30" docker compose -f <file> --profile bigseed up oltp-generate
+  # Cài psycopg lúc container start (chưa có layer site-packages dựng sẵn, xem TODO(verify) ở CLAUDE.md §8).
+  oltp-generate:
+    image: python:3.11-slim
+    container_name: vision-oltp-generate
+    profiles: ["bigseed"]
+    depends_on:
+      oltp-seed:
+        condition: service_completed_successfully
+    restart: "no"
+    environment:
+      VISION_OLTP_DSN: postgresql://vision:vision@postgres-oltp:5432/oltp
+      GENERATE_ARGS: ${GENERATE_ARGS:---users 1000 --days 30}
+    volumes:
+      - ../../src/ingest/oltp:/seed:ro
+    entrypoint: ["bash", "-c", "pip install -q --disable-pip-version-check 'psycopg[binary]==3.2.9' && python /seed/generate.py $$GENERATE_ARGS"]
+
+  # Generator live: mỗi giây một thao tác ngẫu nhiên lên src.user_profile (đổi city/giới tính, thêm/xoá user L…),
+  # để có luồng CDC liên tục. Chỉ đụng user `L…`, không đụng user seed. Bật: docker compose --profile live up -d
+  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/ingest/oltp/generator:oltp_generator_docker
+  oltp-generator:
+    image: com.tm.go.oltp_generator:v1.0.0
+    pull_policy: never
+    container_name: vision-oltp-generator
+    profiles: ["live"]
+    depends_on:
+      oltp-seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      PG_DSN: postgres://vision:vision@postgres-oltp:5432/oltp
+      RATE_PER_SEC: "1"
+      MAX_USERS: "10000"
+
+  # ===== Bước 3: ingest OLTP -> bronze (L1) =====
+
+  # Kafka KRaft 1 node. Trong compose dùng kafka:9092; từ host dùng localhost:29092.
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: vision-kafka
+    ports: ["29092:29092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Debezium = Kafka Connect + connector Postgres. Connector đăng ký ở task CDC (REST :8083).
+  debezium:
+    image: quay.io/debezium/connect:2.7.3.Final
+    container_name: vision-debezium
+    depends_on:
+      kafka: { condition: service_healthy }
+      postgres-oltp: { condition: service_healthy }
+    ports: ["8083:8083"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: vision-connect
+      CONFIG_STORAGE_TOPIC: vision_connect_configs
+      OFFSET_STORAGE_TOPIC: vision_connect_offsets
+      STATUS_STORAGE_TOPIC: vision_connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # MinIO = S3 local cho Iceberg (warehouse) và segment sau này. Console: http://localhost:9001 (vision / vision-secret).
+  # TODO(verify): MinIO không còn pull được từ registry công khai -> pin theo digest của bản local
+  # (RELEASE.2025-09-07T16-13-09Z, arm64). Máy khác chưa có image này sẽ không pull được.
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    container_name: vision-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: vision
+      MINIO_ROOT_PASSWORD: vision-secret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: tạo bucket (idempotent). Cùng lưu ý pin digest như minio.
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    container_name: vision-minio-init
+    depends_on:
+      minio: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 vision vision-secret &&
+        mc mb --ignore-existing local/vision-warehouse local/vision-segments local/vision-flink
+
+  # Iceberg REST catalog, warehouse s3://vision-warehouse trên MinIO. Metadata catalog lưu ở Postgres (DB iceberg_catalog).
+  # One-shot: tạo database `iceberg_catalog` (cùng instance Postgres OLTP, DB riêng, tách khỏi schema `src` mà Debezium đọc).
+  iceberg-catalog-init:
+    image: postgres:16.4
+    container_name: vision-iceberg-catalog-init
+    depends_on:
+      postgres-oltp: { condition: service_healthy }
+    restart: "no"
+    environment:
+      PGPASSWORD: vision
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        psql -h postgres-oltp -U vision -d oltp -tAc "SELECT 1 FROM pg_database WHERE datname='iceberg_catalog'" | grep -q 1 ||
+          psql -h postgres-oltp -U vision -d oltp -c "CREATE DATABASE iceberg_catalog"
+
+  iceberg-rest:
+    build: ./iceberg-rest
+    image: vision/iceberg-rest:1.9.2-pg
+    container_name: vision-iceberg-rest
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      iceberg-catalog-init: { condition: service_completed_successfully }
+    ports: ["8181:8181"]
+    environment:
+      CATALOG_WAREHOUSE: s3://vision-warehouse/
+      CATALOG_URI: jdbc:postgresql://postgres-oltp:5432/iceberg_catalog
+      CATALOG_JDBC_USER: vision
+      CATALOG_JDBC_PASSWORD: vision
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: vision
+      AWS_SECRET_ACCESS_KEY: vision-secret
+      AWS_REGION: us-east-1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8181/v1/config >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Flink 1.20 application mode: JobManager tự chạy job BronzeIngest (Kafka -> Iceberg bronze), UI http://localhost:8081.
+  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/ingest/cdc/flink:bronze_ingest_docker
+  # Checkpoint ở s3://vision-flink/checkpoints (Iceberg sink chỉ commit khi checkpoint xong).
+  flink-jobmanager:
+    image: com.tm.flink.bronze_ingest:v1.0.0
+    pull_policy: never
+    container_name: vision-flink-jobmanager
+    command: ["standalone-job", "--job-classname", "com.tm.vision.ingest.cdc.BronzeIngest"]
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+      iceberg-rest: { condition: service_healthy }
+    ports: ["8081:8081"]
+    environment:
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-hadoop-1.20.2.jar
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        state.checkpoints.dir: s3://vision-flink/checkpoints
+        state.savepoints.dir: s3://vision-flink/savepoints
+        state.checkpoints.num-retained: 3
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        restart-strategy.type: exponential-delay
+        restart-strategy.exponential-delay.initial-backoff: 2s
+        restart-strategy.exponential-delay.max-backoff: 30s
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: vision
+        s3.secret-key: vision-secret
+
+  flink-taskmanager:
+    image: com.tm.flink.bronze_ingest:v1.0.0
+    pull_policy: never
+    container_name: vision-flink-taskmanager
+    command: ["taskmanager"]
+    depends_on:
+      - flink-jobmanager
+    environment:
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-hadoop-1.20.2.jar
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: vision
+        s3.secret-key: vision-secret
+
+  # One-shot: tạo sẵn topic CDC (Flink Kafka source không chịu topic chưa tồn tại, kể cả khi bảng nguồn còn rỗng).
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: vision-kafka-init
+    depends_on:
+      kafka: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for t in user_profile; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic vision.src.$$t.v1 --partitions 3 --replication-factor 1
+        done
+
+  # One-shot: đăng ký connector Debezium (OLTP -> Kafka), idempotent.
+  debezium-register:
+    image: quay.io/debezium/connect:2.7.3.Final
+    container_name: vision-debezium-register
+    depends_on:
+      debezium: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+    restart: "no"
+    volumes:
+      - ../../src/ingest/cdc:/cdc:ro
+    entrypoint: ["bash", "/cdc/debezium/register.sh"]
+
+  # ===== Bước 4: silver (L2) =====
+
+  # One-shot: PySpark local[*] chạy job silver cho một ngày ICT (DS, mặc định hôm nay ICT): bronze.user_profile_cdc_raw ->
+  # silver.user_profile_cdc_events + silver.user_profile_cdc_dlq. Chạy lại cùng DS ra cùng kết quả (idempotent).
+  # Image build bằng Bazel: bazel run --config=linux-arm64 //com/tm/src/batch/silver:silver_user_profile_docker
+  # Chạy: DS=2026-10-03 docker compose -f <file> --profile silver run --rm spark-silver-user-profile
+  spark-silver-user-profile:
+    image: com.tm.spark.silver_user_profile:v1.0.0
+    pull_policy: never
+    container_name: vision-spark-silver-user-profile
+    profiles: ["silver"]
+    depends_on:
+      iceberg-rest: { condition: service_healthy }
+    restart: "no"
+    environment:
+      DS: ${DS:-}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        exec /opt/spark/bin/spark-submit --master 'local[*]' --driver-memory 1g \
+          /app/com/tm/src/batch/silver/user_profile_events.py $${DS:+--ds $$DS}
+
+  # StarRocks (allin1: FE + BE) để xem bảng Iceberg bằng SQL/DBeaver (giao thức MySQL, user root, không mật khẩu).
+  # Bật: docker compose --profile query up -d. Image ~8GB. Bước 5 sẽ dùng lại service này làm gold.
+  # DBeaver: StarRocks, localhost:19030, database `ice.bronze`, user root.
+  starrocks:
+    image: starrocks/allin1-ubuntu:3.5.8
+    container_name: vision-starrocks
+    profiles: ["query"]
+    depends_on:
+      iceberg-rest: { condition: service_healthy }
+    ports: ["19030:9030", "18030:8030"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h127.0.0.1 -P9030 -uroot -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  # One-shot: tạo external catalog `ice` trỏ vào Iceberg REST + MinIO (idempotent).
+  starrocks-init:
+    image: starrocks/allin1-ubuntu:3.5.8
+    container_name: vision-starrocks-init
+    profiles: ["query"]
+    depends_on:
+      starrocks: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mysql -h starrocks -P 9030 -uroot -e "
+        CREATE EXTERNAL CATALOG IF NOT EXISTS ice PROPERTIES (
+          'type' = 'iceberg',
+          'iceberg.catalog.type' = 'rest',
+          'iceberg.catalog.uri' = 'http://iceberg-rest:8181',
+          'iceberg.catalog.warehouse' = 's3://vision-warehouse/',
+          'aws.s3.endpoint' = 'http://minio:9000',
+          'aws.s3.access_key' = 'vision',
+          'aws.s3.secret_key' = 'vision-secret',
+          'aws.s3.enable_path_style_access' = 'true',
+          'aws.s3.region' = 'us-east-1'
+        )"
+
 volumes:
   postgres-oltp-data:
+  kafka-data:
+  minio-data:

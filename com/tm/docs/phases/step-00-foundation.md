@@ -13,14 +13,14 @@ docker-compose.yml (khung) ◀── mỗi bước sau chỉ thêm service nó c
 ```
 
 - Công nghệ: chỉ Bazel 8 (bzlmod). Version pin ở `CLAUDE.md` §8.
-- Ngôn ngữ thêm khi có code thật dùng: Python + macro `com_tm_py_image` ở bước 2 (seed generator); Go, Kotlin + macro image ở bước 8.
+- Ngôn ngữ thêm khi có code thật dùng: Python + macro `com_tm_py_image` ở bước 2 (seed generator); Java 17 (rules_java + rules_jvm_external) ở bước 3 (job Flink); Go + macro `com_tm_go_image` ở bước 2 (generator live); Kotlin + macro image ở bước 8.
 - Không dựng Kafka, Spark, StarRocks… ở đây; xem bảng "Service thêm dần" trong `../phases.md`.
 
 ## Service thêm dần theo bước
 | Bước | Thêm vào compose |
 |---|---|
 | 2 | Postgres OLTP (nguồn) |
-| 3 | Kafka, Debezium, Flink, MinIO + Iceberg REST |
+| 3 | Kafka, Debezium, Flink (image job build bằng Bazel), MinIO + Iceberg REST |
 | 4 | Spark |
 | 5 | StarRocks, Postgres `meta` (catalog) |
 | 9 | Redis |

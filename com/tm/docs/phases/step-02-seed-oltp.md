@@ -13,6 +13,14 @@ schema.sql ──▶ Postgres OLTP ◀── seed script (data ví dụ + ca bi�
 - Dựng Python trên Bazel (rules_python, `pip.parse`, macro `com_tm_py_image`) cho seed generator.
 - Schema theo từng nguồn: bảng, cột, kiểu, khoá, cột thời gian. Bảng event (payment) insert-only; bảng trạng thái (profile, product) có update/delete.
 - Seed có cả ca biên: trùng, đến muộn, xoá/đổi giá trị. Script chạy lại được.
+- OLTP hiện chỉ có bảng `src.user_profile` (schema, seed, generator). Các nguồn khác thêm lại ở bước 11–16 (bản cũ có đủ 6 bảng + seed + generator trong git, commit `84ca0a2`).
+- **Generator live** (Go, image OCI build bằng Bazel): mỗi giây 1 thao tác ngẫu nhiên lên `src.user_profile` (đổi city/giới tính, xoá city, thêm/xoá user `L…`, không đụng user seed) để có luồng CDC liên tục. Bật: `bazel run --config=linux-arm64 //com/tm/src/ingest/oltp/generator:oltp_generator_docker` rồi `docker compose -f com/tm/docker/vision/docker-compose.yml --profile live up -d oltp-generator`. Biến: `RATE_PER_SEC` (1), `MAX_USERS` (10000). Tắt: `docker stop vision-oltp-generator`. Mặc định không chạy để số liệu kiểm tra "bronze khớp OLTP" không lệch.
+- `generate.py` (Python) vẫn dùng để nạp một lần lượng data lớn (`--users --days`); generator live là service chạy liên tục.
 - Phân biệt với Postgres `meta` (catalog) — dựng ở bước 5.
+
+Chạy seed bằng compose (`com/tm/docker/vision/docker-compose.yml`):
+- `docker compose up -d` → service one-shot `oltp-seed` áp `schema.sql` và nạp data ví dụ **nếu chưa có** (tránh sự kiện CDC giả khi chạy lại ở bước 3). Nạp lại: `FORCE_SEED=1 docker compose up oltp-seed`.
+- Data lớn: `GENERATE_ARGS="--users 10000 --days 30" docker compose --profile bigseed up oltp-generate`.
+- `src/ingest/oltp/seed.sh` vẫn dùng được để chạy tay (từ máy host, cần Bazel cho phần generator).
 
 Checklist: xem mục "Bước 2" trong `../checklist.md`.

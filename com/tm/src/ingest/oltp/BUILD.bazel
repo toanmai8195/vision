@@ -1,0 +1,40 @@
+load("@pypi//:requirements.bzl", "requirement")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/rules:com_tm_container.bzl", "com_tm_py_image")
+
+exports_files([
+    "schema.sql",
+    "seed_examples.sql",
+    "seed.sh",
+])
+
+py_library(
+    name = "generate_lib",
+    srcs = ["generate.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        requirement("psycopg"),
+        requirement("psycopg-binary"),
+    ],
+)
+
+# TODO(verify): image chưa cài pip dependency (psycopg); cần layer site-packages trước khi chạy image này.
+com_tm_py_image(
+    name = "generate",
+    srcs = ["generate.py"],
+    main = "generate.py",
+    deps = [
+        requirement("psycopg"),
+        requirement("psycopg-binary"),
+    ],
+)
+
+py_test(
+    name = "generate_test",
+    srcs = ["generate_test.py"],
+    main = "generate_test.py",
+    deps = [
+        ":generate_lib",
+        requirement("pytest"),
+    ],
+)

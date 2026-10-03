@@ -3,11 +3,17 @@
 > **Bản thiết kế + luật làm việc** cho repo `vision`. Code phải khớp định nghĩa ở đây.
 > Đổi semantics (loại dữ liệu, range, DSL, API) → **sửa file này trước**, rồi code + golden test.
 >
-> **⚠️ Hệ thống PHẢI xử lý đủ 4 loại dữ liệu: `MUTEX` · `NOT_MUTEX` · `PARTIAL_VALUE` · `PARTIAL_VALUE_BY_TAG`** ở mọi layer — xem §3.2, §3.5, luật §13.
+> **Phạm vi hiện tại (tối giản): 1 nguồn duy nhất — S2a `user_profile` → `user_city` (MUTEX, STATE).**
+> Làm xong cả luồng (bronze → silver → … → activation) với nguồn này rồi mới mở rộng, theo thứ tự:
+> bước 11 S1 payment — raw/silver đủ cột, xử lý `MUTEX` (`last_txn_category`) trước; 12 `NOT_MUTEX`; 13 `PARTIAL_VALUE` / `PARTIAL_VALUE_BY_TAG` + `aggFunc`;
+> 14 S2b product → `NOT_MUTEX` `STATE`; 15 S4/S5 → `EXTENDED`; 16 S3 churn file → `MUTEX` `EVENT` + REMOVE (xem `checklist.md`).
+> Các nguồn còn lại vẫn mô tả đầy đủ ở tài liệu (là đích cuối), nhưng **chưa** ingest/xử lý cho tới khi tới lượt.
+>
+> **⚠️ Đích cuối: hệ thống PHẢI xử lý đủ 4 loại dữ liệu: `MUTEX` · `NOT_MUTEX` · `PARTIAL_VALUE` · `PARTIAL_VALUE_BY_TAG`** ở mọi layer — xem §3.2, §3.5, luật §13.
 > Hai chiều cấu hình trực giao với loại dữ liệu: **`aggFunc`** (hàm aggregate của `PARTIAL_VALUE(_BY_TAG)`, §3.2.1) và **`attributeType`** `STANDARD`/`EXTENDED` (tag khai báo sẵn hay chuỗi tự do cardinality cao, §3.6).
 >
 > Tài liệu chi tiết (đọc khi cần, không nạp mặc định):
-> - `com/tm/docs/data-types.md` — giải thích trực quan 4 loại dữ liệu, ví dụ timeline, cách chọn loại cho attribute mới
+> - `com/tm/docs/data-types.md` — giải thích trực quan loại dữ liệu theo nguồn hiện có (hiện `MUTEX` + `STATE`, bổ sung khi thêm nguồn), cách chọn loại cho attribute mới
 > - `com/tm/docs/data-flow-examples.md` — dữ liệu qua từng layer, ví dụ input/output đầy đủ (= golden test)
 > - `com/tm/docs/capacity.md` — ước lượng quy mô, chi phí, rủi ro
 > - `com/tm/docs/phases.md` — tổng quan kế hoạch theo layer (bước 0–10)
@@ -38,7 +44,7 @@
 | **Go** | `segment-builder` | rules_go + gazelle, `RoaringBitmap/roaring/v2` |
 | **Kotlin + Vert.x + Dagger2** | `segment-manager`, `activation-api` | JVM 21, Vert.x 5 coroutines, Dagger qua `java_plugin` |
 | **Kafka** | Source event bus + domain event | *bổ sung* |
-| **Debezium + Flink SQL** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze | *bổ sung*, tham khảo thor |
+| **Debezium + Flink (Java, DataStream)** | OLTP (Postgres) → CDC → Kafka → Iceberg bronze; job Java 17 chạy application mode, tham khảo repo `ironman` (`com/tm/flink`) | *bổ sung* |
 | **Spark (PySpark)** | Bronze → Silver (dedup, MERGE CDC, SCD2), backfill | *bổ sung* |
 | **Iceberg** (REST catalog) + **MinIO/S3** | bronze, silver, archive | |
 | **StarRocks 3.5.x** | Gold: tag bitmap, partial value, temporal, range, segment bitmap; đọc Iceberg qua external catalog | |
@@ -55,7 +61,7 @@
 
 ```
 L0 SOURCE        L1 INGESTION       L2 STANDARDIZE       L3 DAILY             L4 TEMPORAL          L5 RANGE              L6 SEGMENT             L7 ACTIVATION
-S1 payment (OLTP)→ CDC→Kafka→Flink   → Spark: dedup, ds,  → StarRocks:         → planner(Py)→SQL:   → tag_range_bitmap    → segment-builder(Go) → activation-api
+S1 payment (OLTP)→ CDC→Kafka→Flink(Java)→ Spark: dedup, ds,  → StarRocks:         → planner(Py)→SQL:   → tag_range_bitmap    → segment-builder(Go) → activation-api
 S2 profile (OLTP)→ Iceberg bronze      →  SCD2, uidx dict   →  tag_daily (ADD/DEL)→  blocks, LATEST,    →  pv_range_value      →  DSL→bitmap, cache  →  (Kotlin/Vert.x)
 S3 ML score file→ Spark file load  →  silver (Iceberg)  →  pv_daily (AGG)     →  STATE checkpoint   →  (mọi supported      →  S3 snapshot, Kafka →  mmap roaring
                   bronze (raw)                                                                         date range)
@@ -165,6 +171,8 @@ Chỉ precompute các range trong `supportedDateRanges` của attribute.
 Hệ quả `STATE`: với **mọi** window kết thúc ở `r`, kết quả = `STATE(r,t)`. Nếu nạp city như `EVENT` thì user đổi city từ 2 năm trước sẽ rơi khỏi A30 — sai kỳ vọng nghiệp vụ.
 
 ### 3.5 Ma trận bắt buộc: mỗi layer xử lý 4 loại thế nào
+
+> Đây là đích cuối. Giai đoạn hiện tại chỉ làm cột/hàng `MUTEX` + `STATE`; ô chưa làm = `TODO` + lỗi tường minh.
 
 | Layer / thành phần | MUTEX | NOT_MUTEX | PARTIAL_VALUE | PARTIAL_VALUE_BY_TAG |
 |---|---|---|---|---|
@@ -288,7 +296,7 @@ Metadata Postgres `meta`: `attribute` (gồm `agg_func`, `attribute_type`), `tag
 
 ## 6. Thành phần
 
-**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → Flink SQL → `bronze.*_raw` exactly-once (tham khảo thor nếu cần); bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
+**Ingestion (L1)** — nguồn nghiệp vụ nằm ở **OLTP** (Postgres nguồn, tách khỏi Postgres `meta`). Ghi vào OLTP trước, **không** ghi song song OLAP (tránh dual-write lệch). Debezium đọc log OLTP → Kafka (key `user_id`) → job Flink Java (`com/tm/src/ingest/cdc/flink`, tham khảo `ironman`) → `bronze.*_raw`; bảng event (payment, insert-only) và bảng trạng thái (profile, product) đều đi đường CDC, giữ cả update/delete + thời điểm thay đổi. Giao at-least-once → dedup `event_id` ở silver. Churn score (file ML) đi đường riêng: PySpark file loader có sensor `_SUCCESS`. Seed generator (Python) sinh data vào OLTP, tham số `--users --days --attrs`.
 
 **Standardize (L2)** — PySpark: parse, dedup `event_id`, `ds` theo ICT, DLQ, Iceberg `MERGE` CDC → SCD2. **Dictionary** `user_id → uidx` append-only, không tái sử dụng; sync Redis + `meta.user_dict_rev(uidx, user_id)`. `UNIVERSE(ds)` = bitmap user hợp lệ. Derived attribute (vd `spend_band`) tính ở đây, đi vào như `STATE`.
 
@@ -372,7 +380,7 @@ vision/
 └── com/tm/
     ├── proto/vision/{segment,catalog,event}/v1/
     ├── src/
-    │   ├── ingest/{oltp(seed+DDL),cdc(debezium,flink SQL),loader(Py)}/
+    │   ├── ingest/{oltp(seed+DDL, generate.py, generator Go live),cdc(debezium,flink Java),loader(Py)}/
     │   ├── batch/{silver,dictionary}/            # PySpark
     │   ├── sql/starrocks/{ddl,daily,dq}/
     │   ├── temporal/                             # model, blocks, latest, ranges, planner, engine, reference, testdata/golden
@@ -385,7 +393,7 @@ vision/
     └── docs/{data-types.md,data-flow-examples.md,capacity.md,phases.md}
 ```
 
-**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7`.
+**Version đã pin (bước 0)** — Bazel `8.7.0` · `rules_python 1.5.4` · `rules_oci 2.2.6` · `tar.bzl 0.3.0` · `platforms 0.0.11` · `bazel_skylib 1.7.1` · `protobuf 29.3` · `rules_proto 7.1.0` · `rules_go 0.53.0` (Go 1.24.1) · `gazelle 0.42.0` · `rules_java 8.14.0` · `rules_jvm_external 6.7` · `rules_kotlin 2.4.10` (Vert.x 5.1.x cần Kotlin ≥ 2.3) · Vert.x `5.1.8` · Dagger `2.60.1` · Micrometer `1.16.7` · Flink `1.20.2` (Java 17) · Iceberg `1.9.2` · flink-connector-kafka `3.3.0-1.20` · Hadoop client `3.3.6` (jar Flink pin sha256 ở `MODULE.bazel`) · Spark `3.5.6` (image `apache/spark:3.5.6-python3` pin digest) · `iceberg-spark-runtime-3.5_2.12` `1.9.2`.
 - Python deps: `pip.parse(hub_name="pypi", requirements_lock="//third_party/python:requirements_lock.txt")`. `TODO(verify)`: image Python hiện cài `requirements` lúc container start (tham khảo thor) — chuyển sang layer site-packages dựng sẵn khi có service Python cần dependency (bước 4).
 - JVM deps: sửa `artifacts` trong `MODULE.bazel` → `bazel run @maven//:pin` (lock `maven_install.json`, `fail_if_repin_required`).
 - Go: `gazelle:map_kind go_binary com_tm_go_image` → gazelle quản lý `go_library`/`go_test`, binary luôn qua macro image.
@@ -409,7 +417,7 @@ java_library(
 )
 ```
 
-**Image**: `com.tm.{py,go,kt,airflow}.<name>:v1.0.0`; target `<name>`, `<name>_image`, `<name>_docker`.
+**Image**: `com.tm.{py,go,kt,flink,airflow}.<name>:v1.0.0` (Flink: `//com/tm/src/ingest/cdc/flink:bronze_ingest_docker`, fat jar + jar Iceberg/Hadoop vào image `flink` pin digest); target `<name>`, `<name>_image`, `<name>_docker`.
 
 **Lệnh**
 ```bash
@@ -417,6 +425,7 @@ bazel build //...
 bazel test //...
 bazel run //:gazelle
 bazel run @maven//:pin
+bazel run --config=linux-arm64 //com/tm/src/ingest/cdc/flink:bronze_ingest_docker   # image job Flink (compose dùng, pull_policy never)
 bazel run //com/tm/src/activation/api:activation_api_docker
 bazel run --config=linux-amd64 //com/tm/src/segment/builder:segment_builder_docker
 docker compose -f com/tm/docker/vision/docker-compose.yml up -d
@@ -464,12 +473,12 @@ docker compose -f com/tm/docker/vision/docker-compose.yml up -d
 
 **Kotlin/Vert.x/Dagger2**: JVM 21; `CoroutineVerticle`, **không block event loop**; một `@Component`/deployable, `@Module` theo concern; constructor injection; client dùng chung `@Singleton`; Router → Handler → Service → Repository.
 
-**Python**: 3.11, type hints, `ruff` + `pytest`; PySpark job có `main(args)` test được với SparkSession local; DAG không import nặng ở top-level.
+**Python**: 3.11 (riêng job PySpark chạy bằng Python 3.8 của image Spark, viết tương thích 3.8), type hints, `ruff` + `pytest`; PySpark job có `main(args)` test được với SparkSession local; DAG không import nặng ở top-level.
 
 **SQL**: một file/bước; template `{{ ds }}`, `{{ attr_id }}`; header ghi input/output + cách idempotent.
 
 **Test bắt buộc**: temporal property test + golden · bitmap codec golden bytes · DSL validate matrix (dataType × dateRange × tagOp × valueRange) · API integration test với `.roar` nhỏ.
-Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 loại** (MUTEX, NOT_MUTEX, PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG); với MUTEX/NOT_MUTEX thì cả `EVENT` và `STATE`, có ca REMOVE; với PARTIAL_VALUE(_BY_TAG) thì mọi `aggFunc`; với NOT_MUTEX / PARTIAL_VALUE_BY_TAG thì cả `STANDARD` và `EXTENDED`.
+Mọi test của daily/temporal/range/segment phải **parametrize theo đủ 4 loại** (giai đoạn hiện tại: chỉ `MUTEX` `STATE`; thêm tham số khi mở rộng, ca chưa hỗ trợ phải test là lỗi tường minh) (MUTEX, NOT_MUTEX, PARTIAL_VALUE, PARTIAL_VALUE_BY_TAG); với MUTEX/NOT_MUTEX thì cả `EVENT` và `STATE`, có ca REMOVE; với PARTIAL_VALUE(_BY_TAG) thì mọi `aggFunc`; với NOT_MUTEX / PARTIAL_VALUE_BY_TAG thì cả `STANDARD` và `EXTENDED`.
 
 **Rẽ nhánh theo loại**: dùng `switch`/`when`/`match` **exhaustive** trên `(dataType, feedMode, attributeType)` và `aggFunc`; nhánh không hỗ trợ → lỗi rõ ràng, **không** `default` rơi ngầm về một loại.
 
@@ -492,14 +501,20 @@ Tổng quan: `com/tm/docs/phases.md`; checklist tổng hợp: `com/tm/docs/check
 | 8 | L6 | proto segment, codec, segment-manager, segment-builder |
 | 9 | L7 | activation-api |
 | 10 | Vận hành | DQ, Airflow, metrics, scale (làm dần từ bước 5) |
+| 11 | Mở rộng | MUTEX EVENT — S1 payment (`last_txn_category`) |
+| 12 | Mở rộng | NOT_MUTEX EVENT — S1 payment (`txn_category`) |
+| 13 | Mở rộng | PARTIAL_VALUE & PARTIAL_VALUE_BY_TAG + `aggFunc` |
+| 14 | Mở rộng | NOT_MUTEX STATE — S2b product holding |
+| 15 | Mở rộng | EXTENDED — S4/S5 (voucher, OA, app event) |
+| 16 | Mở rộng | MUTEX EVENT từ file ML — S3 churn score |
 
-Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng cả 4 loại.
+Mọi bước đụng dữ liệu chỉ **done** khi chạy đúng các loại trong phạm vi hiện tại (đích cuối: cả 4 loại).
 
 ---
 
 ## 13. Luật khi Claude làm việc trong repo này
 
-1. **Luôn xử lý đủ 4 loại dữ liệu** — `MUTEX`, `NOT_MUTEX`, `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG`. Mọi thay đổi ở daily/temporal/range/DSL/segment-builder/activation phải:
+1. **Đích cuối là đủ 4 loại dữ liệu** (giai đoạn hiện tại chỉ làm `MUTEX` `STATE` từ 1 nguồn, xem đầu file; các loại còn lại chưa làm thì ghi `TODO` + lỗi tường minh, không bỏ qua im lặng) — `MUTEX`, `NOT_MUTEX`, `PARTIAL_VALUE`, `PARTIAL_VALUE_BY_TAG`. Mọi thay đổi ở daily/temporal/range/DSL/segment-builder/activation phải:
    - đối chiếu ma trận §3.5 cho từng loại;
    - có test cho từng loại (MUTEX/NOT_MUTEX: cả EVENT và STATE, có REMOVE; PARTIAL_VALUE*: mọi `aggFunc`; NOT_MUTEX/PARTIAL_VALUE_BY_TAG: cả STANDARD và EXTENDED);
    - chỉ báo xong khi cả 4 loại chạy đúng. Nếu cố ý chưa hỗ trợ một loại → báo rõ cho user + `TODO` + lỗi tường minh trong code, không bỏ qua im lặng.

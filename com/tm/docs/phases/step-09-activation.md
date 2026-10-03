@@ -14,5 +14,6 @@ user_id ──Caffeine ▶ Redis ▶ StarRocks──▶ uidx
 - Thêm **Redis** vào compose.
 - Mọi response có `version` + `asOfDs`.
 - SLO: `contains`/`count` p99 < 10ms; `segments by user` p99 < 20ms.
+- Hiện chỉ segment trên `user_city` (golden `seg_0001`).
 
 Checklist: xem mục "Bước 9" trong `../checklist.md`.

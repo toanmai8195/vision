@@ -1,0 +1,22 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# gazelle:prefix com.tm/vision
+# go_binary trong repo luôn tạo qua macro com_tm_go_image (kèm image).
+# gazelle:map_kind go_binary com_tm_go_image //tools/rules:com_tm_container.bzl
+gazelle(name = "gazelle")
+
+platform(
+    name = "linux_amd64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+    ],
+)
